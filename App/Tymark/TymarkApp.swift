@@ -46,6 +46,7 @@ final class AppState: ObservableObject {
     @Published var conflictVersions: [NSFileVersion] = []
     @Published var conflictDocumentURL: URL?
     @Published var exportError: String?
+    @Published var isFocusModeEnabled = false
 
     let spotlightIndexer = SpotlightIndexer()
     let exportManager = ExportManager()
@@ -54,9 +55,307 @@ final class AppState: ObservableObject {
     }()
     let versionManager = DocumentVersionManager()
 
+    // Phase 4: Command & Keybinding System
+    let commandRegistry = CommandRegistry()
+    let keybindingHandler: KeybindingHandler
+    let keybindingLoader = KeybindingLoader()
+    @Published var vimModeHandler = VimModeHandler()
+
     init() {
+        let config = keybindingLoader.load()
+        self.keybindingHandler = KeybindingHandler(configuration: config)
+
         networkMonitor.start()
         syncStatusTracker.configure(with: networkMonitor)
+        commandRegistry.loadShortcutOverrides()
+
+        registerCommands()
+        keybindingHandler.setCommandRegistry(commandRegistry)
+    }
+
+    // MARK: - Command Registration
+
+    private func registerCommands() {
+        commandRegistry.register([
+            // File commands
+            CommandDefinition(
+                id: "file.new",
+                name: "New Document",
+                category: .file,
+                defaultShortcut: "cmd+n"
+            ) { /* Handled by system */ },
+
+            CommandDefinition(
+                id: "file.open",
+                name: "Open Document",
+                category: .file,
+                defaultShortcut: "cmd+o"
+            ) { /* Handled by system */ },
+
+            CommandDefinition(
+                id: "file.save",
+                name: "Save",
+                category: .file,
+                defaultShortcut: "cmd+s"
+            ) { /* Handled by system */ },
+
+            CommandDefinition(
+                id: "file.saveAs",
+                name: "Save As...",
+                category: .file,
+                defaultShortcut: "cmd+shift+s"
+            ) { /* Handled by system */ },
+
+            CommandDefinition(
+                id: "file.close",
+                name: "Close",
+                category: .file,
+                defaultShortcut: "cmd+w"
+            ) { /* Handled by system */ },
+
+            // View commands
+            CommandDefinition(
+                id: "view.commandPalette",
+                name: "Command Palette",
+                category: .view,
+                defaultShortcut: "cmd+shift+p"
+            ) { [weak self] in
+                self?.isCommandPaletteVisible = true
+            },
+
+            CommandDefinition(
+                id: "view.quickOpen",
+                name: "Quick Open",
+                category: .navigate,
+                defaultShortcut: "cmd+p"
+            ) { [weak self] in
+                self?.isQuickOpenVisible = true
+            },
+
+            CommandDefinition(
+                id: "view.toggleSidebar",
+                name: "Toggle Sidebar",
+                category: .view,
+                defaultShortcut: "cmd+shift+b"
+            ) { [weak self] in
+                self?.isSidebarVisible.toggle()
+            },
+
+            CommandDefinition(
+                id: "view.toggleFocusMode",
+                name: "Toggle Focus Mode",
+                category: .view,
+                defaultShortcut: "cmd+shift+f"
+            ) { [weak self] in
+                self?.isFocusModeEnabled.toggle()
+            },
+
+            CommandDefinition(
+                id: "view.toggleSourceMode",
+                name: "Toggle Source Mode",
+                category: .view,
+                defaultShortcut: "cmd+/"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "view.zoomIn",
+                name: "Zoom In",
+                category: .view,
+                defaultShortcut: "cmd+="
+            ) { /* Zoom handled by editor */ },
+
+            CommandDefinition(
+                id: "view.zoomOut",
+                name: "Zoom Out",
+                category: .view,
+                defaultShortcut: "cmd+-"
+            ) { /* Zoom handled by editor */ },
+
+            CommandDefinition(
+                id: "view.resetZoom",
+                name: "Reset Zoom",
+                category: .view,
+                defaultShortcut: "cmd+0"
+            ) { /* Zoom handled by editor */ },
+
+            // Format commands
+            CommandDefinition(
+                id: "format.bold",
+                name: "Bold",
+                category: .format,
+                defaultShortcut: "cmd+b"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.italic",
+                name: "Italic",
+                category: .format,
+                defaultShortcut: "cmd+i"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.strikethrough",
+                name: "Strikethrough",
+                category: .format,
+                defaultShortcut: "cmd+shift+x"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.inlineCode",
+                name: "Inline Code",
+                category: .format,
+                defaultShortcut: "cmd+e"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.link",
+                name: "Insert Link",
+                category: .format,
+                defaultShortcut: "cmd+k"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.heading1",
+                name: "Heading 1",
+                category: .format,
+                defaultShortcut: "cmd+1"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.heading2",
+                name: "Heading 2",
+                category: .format,
+                defaultShortcut: "cmd+2"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.heading3",
+                name: "Heading 3",
+                category: .format,
+                defaultShortcut: "cmd+3"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.heading4",
+                name: "Heading 4",
+                category: .format,
+                defaultShortcut: "cmd+4"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.heading5",
+                name: "Heading 5",
+                category: .format,
+                defaultShortcut: "cmd+5"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.heading6",
+                name: "Heading 6",
+                category: .format,
+                defaultShortcut: "cmd+6"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.orderedList",
+                name: "Ordered List",
+                category: .format,
+                defaultShortcut: "cmd+shift+7"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.unorderedList",
+                name: "Unordered List",
+                category: .format,
+                defaultShortcut: "cmd+shift+8"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.taskList",
+                name: "Task List",
+                category: .format,
+                defaultShortcut: "cmd+shift+9"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.blockquote",
+                name: "Blockquote",
+                category: .format,
+                defaultShortcut: "cmd+shift+."
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.codeBlock",
+                name: "Code Block",
+                category: .format,
+                defaultShortcut: "cmd+shift+c"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "format.horizontalRule",
+                name: "Horizontal Rule",
+                category: .format,
+                defaultShortcut: "cmd+shift+-"
+            ) { /* Dispatched to editor */ },
+
+            // Navigate commands
+            CommandDefinition(
+                id: "navigate.moveLineUp",
+                name: "Move Line Up",
+                category: .navigate,
+                defaultShortcut: "alt+up"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "navigate.moveLineDown",
+                name: "Move Line Down",
+                category: .navigate,
+                defaultShortcut: "alt+down"
+            ) { /* Dispatched to editor */ },
+
+            CommandDefinition(
+                id: "navigate.duplicateLine",
+                name: "Duplicate Line",
+                category: .navigate,
+                defaultShortcut: "cmd+shift+d"
+            ) { /* Dispatched to editor */ },
+
+            // Export commands
+            CommandDefinition(
+                id: "export.html",
+                name: "Export as HTML",
+                category: .export,
+                defaultShortcut: "cmd+shift+e"
+            ) { /* Handled via export action */ },
+
+            CommandDefinition(
+                id: "export.pdf",
+                name: "Export as PDF",
+                category: .export,
+                defaultShortcut: "cmd+alt+p"
+            ) { /* Handled via export action */ },
+
+            CommandDefinition(
+                id: "export.docx",
+                name: "Export as Word",
+                category: .export
+            ) { /* Handled via export action */ },
+
+            CommandDefinition(
+                id: "export.rtf",
+                name: "Export as RTF",
+                category: .export
+            ) { /* Handled via export action */ },
+
+            // Tools
+            CommandDefinition(
+                id: "tools.toggleVimMode",
+                name: "Toggle Vim Mode",
+                category: .tools
+            ) { [weak self] in
+                self?.vimModeHandler.isEnabled.toggle()
+            },
+        ])
     }
 }
 
@@ -144,12 +443,19 @@ struct ContentView: View {
                     .environmentObject(appState.workspaceManager)
             }
         } detail: {
-            TymarkEditorView(
-                text: $document.content,
-                selection: $selection,
-                viewModel: editorViewModel
-            )
-            .frame(minWidth: 400, minHeight: 300)
+            ZStack(alignment: .bottom) {
+                TymarkEditorView(
+                    text: $document.content,
+                    selection: $selection,
+                    viewModel: editorViewModel
+                )
+                .frame(minWidth: 400, minHeight: 300)
+
+                // Vim mode status bar
+                if appState.vimModeHandler.isEnabled {
+                    VimStatusBar(handler: appState.vimModeHandler)
+                }
+            }
         }
         .toolbar {
             ToolbarItemGroup(placement: .principal) {
@@ -201,7 +507,10 @@ struct ContentView: View {
         }
         .focusedValue(\.exportAction, exportDocument)
         .sheet(isPresented: $appState.isCommandPaletteVisible) {
-            CommandPaletteView(isVisible: $appState.isCommandPaletteVisible)
+            CommandPaletteView(
+                isVisible: $appState.isCommandPaletteVisible,
+                registry: appState.commandRegistry
+            )
         }
         .sheet(isPresented: $appState.isQuickOpenVisible) {
             QuickOpenView(isVisible: $appState.isQuickOpenVisible)
@@ -283,6 +592,37 @@ struct ContentView: View {
                     appState.exportError = "Failed to save file: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+}
+
+// MARK: - Vim Status Bar
+
+struct VimStatusBar: View {
+    @ObservedObject var handler: VimModeHandler
+
+    var body: some View {
+        HStack {
+            Text(handler.statusMessage)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.white)
+            Spacer()
+            Text(handler.mode.rawValue.uppercased())
+                .font(.system(.caption, design: .monospaced))
+                .fontWeight(.bold)
+                .foregroundColor(modeColor)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color.black.opacity(0.85))
+    }
+
+    private var modeColor: Color {
+        switch handler.mode {
+        case .normal: return .green
+        case .insert: return .blue
+        case .visual: return .orange
+        case .command: return .yellow
         }
     }
 }
@@ -462,57 +802,104 @@ struct FileRow: View {
     }
 }
 
-// MARK: - Command Palette View
+// MARK: - Command Palette View (Phase 4: Wired to CommandRegistry)
 
 struct CommandPaletteView: View {
     @Binding var isVisible: Bool
+    @ObservedObject var registry: CommandRegistry
     @State private var searchText = ""
+    @State private var selectedIndex = 0
 
-    let commands: [(name: String, shortcut: String, action: () -> Void)] = [
-        ("New Document", "Cmd+N", {}),
-        ("Open Document", "Cmd+O", {}),
-        ("Save", "Cmd+S", {}),
-        ("Quick Open", "Cmd+P", {}),
-        ("Toggle Sidebar", "Cmd+Shift+B", {}),
-        ("Toggle Focus Mode", "Cmd+Shift+F", {}),
-        ("Export to HTML", "Cmd+Shift+E", {}),
-        ("Export to PDF", "Cmd+Shift+P", {}),
-        ("Export to Word", "Cmd+Shift+W", {}),
-        ("Toggle Source Mode", "Cmd+/", {}),
-        ("Insert Link", "Cmd+K", {}),
-        ("Bold", "Cmd+B", {}),
-        ("Italic", "Cmd+I", {}),
-    ]
-
-    var filteredCommands: [(name: String, shortcut: String, action: () -> Void)] {
-        if searchText.isEmpty {
-            return commands
-        }
-        return commands.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    var filteredCommands: [CommandDefinition] {
+        registry.search(query: searchText)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Search commands...", text: $searchText)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding()
+            // Search field
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Type a command...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16))
+                    .onSubmit {
+                        executeSelectedCommand()
+                    }
+            }
+            .padding(12)
+            .background(Color(.controlBackgroundColor))
 
-            List(filteredCommands, id: \.name) { command in
-                HStack {
-                    Text(command.name)
-                    Spacer()
-                    Text(command.shortcut)
-                        .foregroundColor(.secondary)
-                        .font(.caption)
+            Divider()
+
+            // Command list
+            ScrollViewReader { proxy in
+                List(Array(filteredCommands.enumerated()), id: \.element.id) { index, command in
+                    CommandPaletteRow(
+                        command: command,
+                        shortcut: registry.shortcut(for: command.id),
+                        isSelected: index == selectedIndex
+                    )
+                    .id(command.id)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        command.execute()
+                        isVisible = false
+                    }
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    command.action()
-                    isVisible = false
+                .listStyle(.plain)
+                .onChange(of: selectedIndex) { _, newValue in
+                    if newValue < filteredCommands.count {
+                        proxy.scrollTo(filteredCommands[newValue].id, anchor: .center)
+                    }
                 }
             }
         }
-        .frame(width: 500, height: 400)
+        .frame(width: 550, height: 420)
+        .onChange(of: searchText) { _, _ in
+            selectedIndex = 0
+        }
+    }
+
+    private func executeSelectedCommand() {
+        guard selectedIndex < filteredCommands.count else { return }
+        filteredCommands[selectedIndex].execute()
+        isVisible = false
+    }
+}
+
+// MARK: - Command Palette Row
+
+struct CommandPaletteRow: View {
+    let command: CommandDefinition
+    let shortcut: String?
+    let isSelected: Bool
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(command.name)
+                    .font(.system(size: 13))
+                Text(command.category.rawValue)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if let shortcut = shortcut {
+                Text(KeyComboParser.displayString(for: shortcut))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(.separatorColor).opacity(0.3))
+                    .cornerRadius(4)
+            }
+        }
+        .padding(.vertical, 2)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .cornerRadius(4)
     }
 }
 
@@ -538,7 +925,7 @@ struct QuickOpenView: View {
     }
 }
 
-// MARK: - Settings View
+// MARK: - Settings View (Phase 4: Added Keybindings tab)
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
@@ -558,15 +945,19 @@ struct SettingsView: View {
                 .tabItem { Label("Editor", systemImage: "doc.text") }
                 .tag(2)
 
+            KeybindingsSettingsView()
+                .tabItem { Label("Keybindings", systemImage: "keyboard") }
+                .tag(3)
+
             SyncSettingsView()
                 .tabItem { Label("Sync", systemImage: "arrow.clockwise") }
-                .tag(3)
+                .tag(4)
 
             ExportSettingsView()
                 .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
-                .tag(4)
+                .tag(5)
         }
-        .frame(width: 500, height: 400)
+        .frame(width: 560, height: 450)
     }
 }
 
@@ -619,10 +1010,11 @@ struct EditorSettingsView: View {
     @AppStorage("useSpacesForTabs") private var useSpacesForTabs = true
     @AppStorage("enableSmartPairs") private var enableSmartPairs = true
     @AppStorage("enableSmartLists") private var enableSmartLists = true
+    @EnvironmentObject var appState: AppState
 
     var body: some View {
         Form {
-            Section {
+            Section("Input") {
                 Picker("Tab width", selection: $tabWidth) {
                     Text("2 spaces").tag(2)
                     Text("4 spaces").tag(4)
@@ -633,8 +1025,92 @@ struct EditorSettingsView: View {
                 Toggle("Enable smart pairs", isOn: $enableSmartPairs)
                 Toggle("Enable smart lists", isOn: $enableSmartLists)
             }
+
+            Section("Vim Mode") {
+                Toggle("Enable Vim mode", isOn: $appState.vimModeHandler.isEnabled)
+                if appState.vimModeHandler.isEnabled {
+                    HStack {
+                        Text("Current mode:")
+                        Text(appState.vimModeHandler.mode.rawValue.capitalized)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         }
         .padding()
+    }
+}
+
+// MARK: - Keybindings Settings (Phase 4: New)
+
+struct KeybindingsSettingsView: View {
+    @EnvironmentObject var appState: AppState
+    @State private var searchText = ""
+
+    var filteredCommands: [CommandDefinition] {
+        appState.commandRegistry.search(query: searchText)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Search
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Search keybindings...", text: $searchText)
+                    .textFieldStyle(.plain)
+            }
+            .padding(8)
+            .background(Color(.controlBackgroundColor))
+
+            Divider()
+
+            // Keybinding list
+            List(filteredCommands, id: \.id) { command in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(command.name)
+                            .font(.system(size: 12))
+                        Text(command.id)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    if let shortcut = appState.commandRegistry.shortcut(for: command.id) {
+                        Text(KeyComboParser.displayString(for: shortcut))
+                            .font(.system(size: 11, design: .monospaced))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color(.separatorColor).opacity(0.3))
+                            .cornerRadius(4)
+                    } else {
+                        Text("Not set")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            .listStyle(.plain)
+
+            Divider()
+
+            // Footer with reset button
+            HStack {
+                Button("Reset to Defaults") {
+                    appState.commandRegistry.resetAllShortcuts()
+                }
+
+                Spacer()
+
+                Text("\(filteredCommands.count) commands")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(8)
+        }
     }
 }
 
@@ -736,6 +1212,17 @@ struct TymarkCommands: Commands {
                 appState.isCommandPaletteVisible = true
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Toggle Focus Mode") {
+                appState.isFocusModeEnabled.toggle()
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+
+            Divider()
+
+            Toggle("Vim Mode", isOn: $appState.vimModeHandler.isEnabled)
         }
 
         CommandMenu("Export") {

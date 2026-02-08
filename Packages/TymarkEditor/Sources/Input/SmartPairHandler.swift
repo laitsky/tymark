@@ -283,6 +283,8 @@ public final class SmartListHandler {
 
 // MARK: - Keybinding Handler
 
+/// Handles keyboard shortcuts by delegating to a CommandRegistry.
+/// Integrates JSON-based keybinding configuration with the command system.
 public final class KeybindingHandler {
 
     // MARK: - Properties
@@ -291,14 +293,42 @@ public final class KeybindingHandler {
 
     private var keybindings: [String: KeybindingAction] = [:]
     private var commandPaletteHandler: (() -> Void)?
+    private weak var commandRegistry: CommandRegistry?
+    private var configuration: KeybindingConfiguration
 
     // MARK: - Initialization
 
-    public init() {
+    public init(configuration: KeybindingConfiguration = .default) {
+        self.configuration = configuration
         setupDefaultKeybindings()
     }
 
     // MARK: - Public API
+
+    /// Attach a CommandRegistry so keybindings can dispatch through the command system.
+    @MainActor
+    public func setCommandRegistry(_ registry: CommandRegistry) {
+        self.commandRegistry = registry
+
+        // Sync the configuration's bindings into the registry's shortcut overrides
+        for entry in configuration.bindings {
+            registry.setShortcut(entry.key, for: entry.commandID)
+        }
+    }
+
+    /// Load a new keybinding configuration (e.g., from JSON).
+    @MainActor
+    public func loadConfiguration(_ config: KeybindingConfiguration) {
+        self.configuration = config
+
+        // Re-sync with registry
+        if let registry = commandRegistry {
+            registry.resetAllShortcuts()
+            for entry in config.bindings {
+                registry.setShortcut(entry.key, for: entry.commandID)
+            }
+        }
+    }
 
     public func registerKeybinding(_ keyCombo: String, action: @escaping KeybindingAction) {
         keybindings[keyCombo.lowercased()] = action
@@ -308,9 +338,15 @@ public final class KeybindingHandler {
         keybindings.removeValue(forKey: keyCombo.lowercased())
     }
 
+    @MainActor
     public func handleKeyEvent(_ event: NSEvent) -> Bool {
-        let keyCombo = keyComboString(from: event)
+        // First, try the CommandRegistry
+        if let registry = commandRegistry, registry.handleKeyEvent(event) {
+            return true
+        }
 
+        // Fall back to local keybindings
+        let keyCombo = KeyComboParser.keyComboString(from: event)
         if let action = keybindings[keyCombo] {
             return action()
         }
@@ -326,117 +362,18 @@ public final class KeybindingHandler {
         commandPaletteHandler?()
     }
 
+    /// Returns the current keybinding configuration.
+    public var currentConfiguration: KeybindingConfiguration {
+        return configuration
+    }
+
     // MARK: - Private Methods
 
     private func setupDefaultKeybindings() {
-        // Command Palette
+        // Command Palette fallback (also registered in the CommandRegistry)
         registerKeybinding("cmd+shift+p") { [weak self] in
             self?.showCommandPalette()
             return true
         }
-
-        // Quick Open
-        registerKeybinding("cmd+p") {
-            // Show quick open
-            return true
-        }
-
-        // Toggle sidebar
-        registerKeybinding("cmd+shift+b") {
-            // Toggle sidebar visibility
-            return true
-        }
-
-        // Toggle focus mode
-        registerKeybinding("cmd+shift+f") {
-            // Toggle focus mode
-            return true
-        }
-
-        // Export
-        registerKeybinding("cmd+e") {
-            // Show export dialog
-            return true
-        }
-
-        // Toggle source/rendered mode
-        registerKeybinding("cmd+/") {
-            // Toggle view mode
-            return true
-        }
-
-        // Insert link
-        registerKeybinding("cmd+k") {
-            // Insert link
-            return true
-        }
-
-        // Bold
-        registerKeybinding("cmd+b") {
-            // Toggle bold
-            return true
-        }
-
-        // Italic
-        registerKeybinding("cmd+i") {
-            // Toggle italic
-            return true
-        }
-
-        // Code
-        registerKeybinding("cmd+shift+c") {
-            // Toggle code
-            return true
-        }
-
-        // Heading
-        registerKeybinding("cmd+1") {
-            // Toggle heading 1
-            return true
-        }
-        registerKeybinding("cmd+2") {
-            // Toggle heading 2
-            return true
-        }
-        registerKeybinding("cmd+3") {
-            // Toggle heading 3
-            return true
-        }
-
-        // Move line up
-        registerKeybinding("alt+up") {
-            // Move line up
-            return true
-        }
-
-        // Move line down
-        registerKeybinding("alt+down") {
-            // Move line down
-            return true
-        }
-    }
-
-    private func keyComboString(from event: NSEvent) -> String {
-        var parts: [String] = []
-
-        if event.modifierFlags.contains(.command) {
-            parts.append("cmd")
-        }
-        if event.modifierFlags.contains(.option) {
-            parts.append("alt")
-        }
-        if event.modifierFlags.contains(.control) {
-            parts.append("ctrl")
-        }
-        if event.modifierFlags.contains(.shift) {
-            parts.append("shift")
-        }
-
-        // Add the key character
-        if let chars = event.charactersIgnoringModifiers {
-            parts.append(chars.lowercased())
-        }
-
-        return parts.joined(separator: "+")
     }
 }
