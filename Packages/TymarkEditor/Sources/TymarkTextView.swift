@@ -355,7 +355,9 @@ public final class TymarkTextView: NSTextView {
 
 extension TymarkTextView: CursorProximityTrackerDelegate {
     public func cursorProximityTracker(_ tracker: CursorProximityTracker, didUpdateLocation location: Int) {
-        updateCursorProximity()
+        // Intentionally empty: updateCursorProximity() already drives the tracker,
+        // so calling it again here would cause infinite recursion.
+        toggleSyntaxVisibility(at: location)
     }
 }
 
