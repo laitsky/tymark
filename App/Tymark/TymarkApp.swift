@@ -5,6 +5,7 @@ import TymarkEditor
 import TymarkTheme
 import TymarkWorkspace
 import TymarkSync
+import TymarkExport
 
 // MARK: - Tymark App
 
@@ -15,8 +16,8 @@ struct TymarkApp: App {
     @StateObject private var appState = AppState()
 
     var body: some Scene {
-        DocumentGroup(newDocument: TymarkDocumentModel()) {
-            ContentView(document: $0.$document)
+        DocumentGroup(newDocument: { TymarkDocumentModel() }) { configuration in
+            ContentView(document: configuration.document, fileURL: configuration.fileURL)
                 .environmentObject(appState)
         }
         .commands {
@@ -36,32 +37,54 @@ struct TymarkApp: App {
 final class AppState: ObservableObject {
     @Published var themeManager = ThemeManager.shared
     @Published var workspaceManager = WorkspaceManager()
+    @Published var syncStatusTracker = SyncStatusTracker()
+    @Published var networkMonitor = NetworkMonitor()
     @Published var isSidebarVisible = true
     @Published var isCommandPaletteVisible = false
     @Published var isQuickOpenVisible = false
+    @Published var isConflictSheetVisible = false
+    @Published var conflictVersions: [NSFileVersion] = []
+    @Published var conflictDocumentURL: URL?
+    @Published var exportError: String?
+
+    let spotlightIndexer = SpotlightIndexer()
+    let exportManager = ExportManager()
+    lazy var cloudSyncManager: TymarkSync.iCloudSyncManager = {
+        TymarkSync.iCloudSyncManager(syncStatusTracker: syncStatusTracker, networkMonitor: networkMonitor)
+    }()
+    let versionManager = DocumentVersionManager()
+
+    init() {
+        networkMonitor.start()
+        syncStatusTracker.configure(with: networkMonitor)
+    }
 }
 
-// MARK: - Document Model
+// MARK: - Document Model (ReferenceFileDocument)
 
-struct TymarkDocumentModel: FileDocument {
-    var content: String {
+final class TymarkDocumentModel: ReferenceFileDocument, @unchecked Sendable {
+
+    @Published var content: String {
         didSet {
             updateMetadata()
         }
     }
-    var metadata: TymarkSync.TymarkDocument.DocumentMetadata
+    @Published var metadata: DocumentMetadata
 
     init(content: String = "") {
         self.content = content
-        self.metadata = TymarkSync.TymarkDocument.DocumentMetadata()
+        self.metadata = DocumentMetadata()
         updateMetadata()
     }
 
-    private mutating func updateMetadata() {
+    private func updateMetadata() {
         metadata.modifiedAt = Date()
         metadata.characterCount = (content as NSString).length
         metadata.wordCount = content.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+        metadata.title = MarkdownContentHelpers.extractTitle(from: content)
     }
+
+    // MARK: - ReferenceFileDocument
 
     static var readableContentTypes: [UTType] {
         [.plainText, .markdown]
@@ -71,21 +94,36 @@ struct TymarkDocumentModel: FileDocument {
         [.plainText, .markdown]
     }
 
-    init(configuration: ReadConfiguration) throws {
+    convenience init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents,
               let string = String(data: data, encoding: .utf8) else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        self.content = string
-        self.metadata = TymarkSync.TymarkDocument.DocumentMetadata()
-        updateMetadata()
+        self.init(content: string)
     }
 
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        guard let data = content.data(using: .utf8) else {
+    func snapshot(contentType: UTType) throws -> String {
+        return content
+    }
+
+    func fileWrapper(snapshot: String, configuration: WriteConfiguration) throws -> FileWrapper {
+        guard let data = snapshot.data(using: .utf8) else {
             throw CocoaError(.fileWriteInapplicableStringEncoding)
         }
         return FileWrapper(regularFileWithContents: data)
+    }
+}
+
+// MARK: - Focused Values for Export
+
+struct ExportActionKey: FocusedValueKey {
+    typealias Value = (String) -> Void
+}
+
+extension FocusedValues {
+    var exportAction: ExportActionKey.Value? {
+        get { self[ExportActionKey.self] }
+        set { self[ExportActionKey.self] = newValue }
     }
 }
 
@@ -93,7 +131,8 @@ struct TymarkDocumentModel: FileDocument {
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @Binding var document: TymarkDocumentModel
+    @ObservedObject var document: TymarkDocumentModel
+    var fileURL: URL?
 
     @State private var selection = NSRange(location: 0, length: 0)
     @StateObject private var editorViewModel = EditorViewModel()
@@ -121,6 +160,9 @@ struct ContentView: View {
 
                     Spacer()
 
+                    // Sync status indicator
+                    SyncStatusView(tracker: appState.syncStatusTracker)
+
                     Menu {
                         ForEach(appState.themeManager.availableThemes, id: \.id) { theme in
                             Button(theme.name) {
@@ -132,6 +174,24 @@ struct ContentView: View {
                         Image(systemName: "paintbrush")
                     }
 
+                    // Export menu
+                    Menu {
+                        Button("Export as HTML...") {
+                            exportDocument(format: "html")
+                        }
+                        Button("Export as PDF...") {
+                            exportDocument(format: "pdf")
+                        }
+                        Button("Export as Word (.docx)...") {
+                            exportDocument(format: "docx")
+                        }
+                        Button("Export as RTF...") {
+                            exportDocument(format: "rtf")
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+
                     Button(action: { appState.isCommandPaletteVisible = true }) {
                         Image(systemName: "command")
                     }
@@ -139,6 +199,7 @@ struct ContentView: View {
                 }
             }
         }
+        .focusedValue(\.exportAction, exportDocument)
         .sheet(isPresented: $appState.isCommandPaletteVisible) {
             CommandPaletteView(isVisible: $appState.isCommandPaletteVisible)
         }
@@ -146,9 +207,194 @@ struct ContentView: View {
             QuickOpenView(isVisible: $appState.isQuickOpenVisible)
                 .environmentObject(appState.workspaceManager)
         }
+        .sheet(isPresented: $appState.isConflictSheetVisible) {
+            ConflictResolutionView(
+                versions: appState.conflictVersions,
+                isVisible: $appState.isConflictSheetVisible,
+                onResolve: { keepLocal in
+                    if let url = appState.conflictDocumentURL {
+                        appState.cloudSyncManager.resolveConflicts(for: url, keepingCurrent: keepLocal)
+                    }
+                }
+            )
+        }
+        .alert("Export Error", isPresented: Binding(
+            get: { appState.exportError != nil },
+            set: { if !$0 { appState.exportError = nil } }
+        )) {
+            Button("OK") { appState.exportError = nil }
+        } message: {
+            Text(appState.exportError ?? "")
+        }
         .onAppear {
             editorViewModel.setTheme(appState.themeManager.currentTheme)
         }
+        .onChange(of: document.content) { _, newValue in
+            // Index updated content in Spotlight using real document URL
+            if let url = fileURL {
+                appState.spotlightIndexer.indexDocument(
+                    at: url,
+                    content: newValue,
+                    title: document.metadata.title
+                )
+            }
+        }
+    }
+
+    // MARK: - Export
+
+    private func exportDocument(format: String) {
+        let parser = MarkdownParser()
+        let parsedDoc = parser.parse(document.content)
+        let theme = appState.themeManager.currentTheme
+
+        guard let data = appState.exportManager.export(
+            document: parsedDoc,
+            format: format,
+            theme: theme
+        ) else {
+            appState.exportError = "Failed to generate \(format.uppercased()) export."
+            return
+        }
+
+        let panel = NSSavePanel()
+        let docTitle = document.metadata.title ?? "Export"
+        panel.nameFieldStringValue = "\(docTitle).\(format)"
+
+        switch format {
+        case "html":
+            panel.allowedContentTypes = [UTType.html]
+        case "pdf":
+            panel.allowedContentTypes = [UTType.pdf]
+        case "docx":
+            panel.allowedContentTypes = [UTType(filenameExtension: "docx")!]
+        case "rtf":
+            panel.allowedContentTypes = [UTType.rtf]
+        default:
+            break
+        }
+
+        panel.begin { result in
+            guard result == .OK, let url = panel.url else { return }
+            do {
+                try data.write(to: url)
+            } catch {
+                Task { @MainActor in
+                    appState.exportError = "Failed to save file: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Sync Status View
+
+struct SyncStatusView: View {
+    @ObservedObject var tracker: SyncStatusTracker
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: tracker.status.systemImageName)
+                .font(.caption)
+                .foregroundColor(statusColor)
+
+            if tracker.status.isPending {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 12, height: 12)
+            }
+        }
+        .help(tracker.status.description)
+    }
+
+    private var statusColor: Color {
+        switch tracker.status {
+        case .synced: return .green
+        case .syncing, .pendingUpload, .pendingDownload: return .blue
+        case .conflict: return .orange
+        case .error: return .red
+        case .offline: return .gray
+        }
+    }
+}
+
+// MARK: - Conflict Resolution View
+
+struct ConflictResolutionView: View {
+    let versions: [NSFileVersion]
+    @Binding var isVisible: Bool
+    let onResolve: (Bool) -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.largeTitle)
+                .foregroundColor(.orange)
+
+            Text("Document Conflict")
+                .font(.headline)
+
+            Text("This document has been modified in multiple locations. Choose which version to keep.")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
+            if let latestConflict = versions.sorted(by: {
+                ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast)
+            }).first {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Local version")
+                            .fontWeight(.medium)
+                        Spacer()
+                        Text("Current")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Text("Remote version")
+                            .fontWeight(.medium)
+                        Spacer()
+                        if let date = latestConflict.modificationDate {
+                            Text(date, style: .relative)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        if let device = latestConflict.localizedNameOfSavingComputer {
+                            Text("from \(device)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(.controlBackgroundColor))
+                .cornerRadius(8)
+            }
+
+            HStack(spacing: 12) {
+                Button("Keep Local") {
+                    onResolve(true)
+                    isVisible = false
+                }
+                .keyboardShortcut(.defaultAction)
+
+                Button("Keep Remote") {
+                    onResolve(false)
+                    isVisible = false
+                }
+
+                Button("Cancel") {
+                    isVisible = false
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 450)
     }
 }
 
@@ -230,6 +476,8 @@ struct CommandPaletteView: View {
         ("Toggle Sidebar", "Cmd+Shift+B", {}),
         ("Toggle Focus Mode", "Cmd+Shift+F", {}),
         ("Export to HTML", "Cmd+Shift+E", {}),
+        ("Export to PDF", "Cmd+Shift+P", {}),
+        ("Export to Word", "Cmd+Shift+W", {}),
         ("Toggle Source Mode", "Cmd+/", {}),
         ("Insert Link", "Cmd+K", {}),
         ("Bold", "Cmd+B", {}),
@@ -281,7 +529,6 @@ struct QuickOpenView: View {
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .padding()
 
-            // Results would go here
             List {
                 Text("Files matching '\(searchText)'")
                     .foregroundColor(.secondary)
@@ -314,6 +561,10 @@ struct SettingsView: View {
             SyncSettingsView()
                 .tabItem { Label("Sync", systemImage: "arrow.clockwise") }
                 .tag(3)
+
+            ExportSettingsView()
+                .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
+                .tag(4)
         }
         .frame(width: 500, height: 400)
     }
@@ -392,12 +643,69 @@ struct EditorSettingsView: View {
 struct SyncSettingsView: View {
     @AppStorage("enableICloudSync") private var enableICloudSync = true
     @AppStorage("enableAutoSave") private var enableAutoSave = true
+    @AppStorage("autoSaveInterval") private var autoSaveInterval = 2.0
+    @AppStorage("followSystemAppearance") private var followSystemAppearance = false
+    @EnvironmentObject var appState: AppState
 
     var body: some View {
         Form {
-            Section {
+            Section("iCloud") {
                 Toggle("Enable iCloud sync", isOn: $enableICloudSync)
+
+                HStack {
+                    Text("Status:")
+                    Image(systemName: appState.syncStatusTracker.status.systemImageName)
+                    Text(appState.syncStatusTracker.status.description)
+                        .foregroundColor(.secondary)
+                }
+
+                if let lastSync = appState.syncStatusTracker.lastSyncDescription {
+                    HStack {
+                        Text("Last synced:")
+                        Text(lastSync)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Section("Auto-Save") {
                 Toggle("Auto-save", isOn: $enableAutoSave)
+
+                if enableAutoSave {
+                    HStack {
+                        Text("Save interval:")
+                        Slider(value: $autoSaveInterval, in: 1...10, step: 1)
+                        Text("\(Int(autoSaveInterval))s")
+                            .frame(width: 30)
+                    }
+                }
+            }
+
+            Section("Appearance") {
+                Toggle("Follow system appearance", isOn: $followSystemAppearance)
+            }
+        }
+        .padding()
+    }
+}
+
+// MARK: - Export Settings
+
+struct ExportSettingsView: View {
+    @AppStorage("pdfPageSize") private var pdfPageSize = "letter"
+    @AppStorage("exportIncludeMetadata") private var exportIncludeMetadata = true
+
+    var body: some View {
+        Form {
+            Section("PDF") {
+                Picker("Page size", selection: $pdfPageSize) {
+                    Text("US Letter").tag("letter")
+                    Text("A4").tag("a4")
+                }
+            }
+
+            Section("General") {
+                Toggle("Include metadata in exports", isOn: $exportIncludeMetadata)
             }
         }
         .padding()
@@ -408,6 +716,7 @@ struct SyncSettingsView: View {
 
 struct TymarkCommands: Commands {
     var appState: AppState
+    @FocusedValue(\.exportAction) var exportAction
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -427,6 +736,29 @@ struct TymarkCommands: Commands {
                 appState.isCommandPaletteVisible = true
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
+        }
+
+        CommandMenu("Export") {
+            Button("Export as HTML...") {
+                exportAction?("html")
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(exportAction == nil)
+
+            Button("Export as PDF...") {
+                exportAction?("pdf")
+            }
+            .disabled(exportAction == nil)
+
+            Button("Export as Word...") {
+                exportAction?("docx")
+            }
+            .disabled(exportAction == nil)
+
+            Button("Export as RTF...") {
+                exportAction?("rtf")
+            }
+            .disabled(exportAction == nil)
         }
     }
 }

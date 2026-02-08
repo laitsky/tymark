@@ -44,6 +44,25 @@ public enum SyncStatus: Equatable {
             return "Offline"
         }
     }
+
+    public var systemImageName: String {
+        switch self {
+        case .synced:
+            return "checkmark.icloud"
+        case .syncing:
+            return "arrow.triangle.2.circlepath.icloud"
+        case .pendingUpload:
+            return "icloud.and.arrow.up"
+        case .pendingDownload:
+            return "icloud.and.arrow.down"
+        case .conflict:
+            return "exclamationmark.icloud"
+        case .error:
+            return "xmark.icloud"
+        case .offline:
+            return "icloud.slash"
+        }
+    }
 }
 
 // MARK: - Sync Status Tracker
@@ -62,6 +81,7 @@ public final class SyncStatusTracker: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var pendingChanges: [UUID: Date] = [:]
+    private weak var networkMonitor: NetworkMonitor?
 
     // MARK: - Callbacks
 
@@ -70,8 +90,24 @@ public final class SyncStatusTracker: ObservableObject {
 
     // MARK: - Initialization
 
-    public init() {
-        setupNetworkMonitoring()
+    public init() {}
+
+    /// Connect to a NetworkMonitor for real connectivity tracking.
+    public func configure(with networkMonitor: NetworkMonitor) {
+        self.networkMonitor = networkMonitor
+
+        networkMonitor.$isConnected
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isConnected in
+                guard let self else { return }
+                if isConnected {
+                    self.goOnline()
+                } else {
+                    self.goOffline()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Public API
@@ -131,27 +167,20 @@ public final class SyncStatusTracker: ObservableObject {
         onStatusChange?(status)
     }
 
-    // MARK: - Private Methods
+    /// Formatted string for the last sync time.
+    public var lastSyncDescription: String? {
+        guard let date = lastSyncDate else { return nil }
 
-    private func setupNetworkMonitoring() {
-        // Monitor network reachability
-        NotificationCenter.default
-            .publisher(for: .init("NSProcessInfoPowerStateDidChangeNotification"))
-            .sink { [weak self] _ in
-                self?.checkNetworkStatus()
-            }
-            .store(in: &cancellables)
-    }
-
-    private func checkNetworkStatus() {
-        // Simplified network check
-        // In production, use NWPathMonitor
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
 // MARK: - Conflict Resolver
 
-public final class ConflictResolver: @unchecked Sendable {
+@MainActor
+public final class ConflictResolver {
 
     public struct Conflict {
         public let documentID: UUID
@@ -159,6 +188,14 @@ public final class ConflictResolver: @unchecked Sendable {
         public let remoteVersion: String
         public let localDate: Date
         public let remoteDate: Date
+
+        public init(documentID: UUID, localVersion: String, remoteVersion: String, localDate: Date, remoteDate: Date) {
+            self.documentID = documentID
+            self.localVersion = localVersion
+            self.remoteVersion = remoteVersion
+            self.localDate = localDate
+            self.remoteDate = remoteDate
+        }
     }
 
     public enum ResolutionStrategy {
@@ -170,6 +207,8 @@ public final class ConflictResolver: @unchecked Sendable {
 
     public var resolutionStrategy: ResolutionStrategy = .askUser
 
+    public init() {}
+
     public func resolve(_ conflict: Conflict) -> String {
         switch resolutionStrategy {
         case .preferLocal:
@@ -179,21 +218,14 @@ public final class ConflictResolver: @unchecked Sendable {
         case .merge:
             return attemptMerge(conflict)
         case .askUser:
-            // Return local by default, user will be prompted
             return conflict.localVersion
         }
     }
 
     private func attemptMerge(_ conflict: Conflict) -> String {
-        // Two-way merge using longest common subsequence (LCS).
-        // Without a common ancestor, we find shared lines via LCS,
-        // interleave unique lines from each side, and mark true
-        // conflicts with standard conflict markers.
-
         let localLines = conflict.localVersion.components(separatedBy: "\n")
         let remoteLines = conflict.remoteVersion.components(separatedBy: "\n")
 
-        // Build LCS table
         let lcs = longestCommonSubsequence(localLines, remoteLines)
 
         var mergedLines: [String] = []
@@ -201,21 +233,18 @@ public final class ConflictResolver: @unchecked Sendable {
         var j = 0
 
         for commonLine in lcs {
-            // Collect local-only lines before this common line
             var localOnly: [String] = []
             while i < localLines.count && localLines[i] != commonLine {
                 localOnly.append(localLines[i])
                 i += 1
             }
 
-            // Collect remote-only lines before this common line
             var remoteOnly: [String] = []
             while j < remoteLines.count && remoteLines[j] != commonLine {
                 remoteOnly.append(remoteLines[j])
                 j += 1
             }
 
-            // If both sides have unique lines, mark as conflict
             if !localOnly.isEmpty && !remoteOnly.isEmpty {
                 mergedLines.append("<<<<<<< LOCAL")
                 mergedLines.append(contentsOf: localOnly)
@@ -228,11 +257,10 @@ public final class ConflictResolver: @unchecked Sendable {
             }
 
             mergedLines.append(commonLine)
-            i += 1 // skip past the common line in local
-            j += 1 // skip past the common line in remote
+            i += 1
+            j += 1
         }
 
-        // Handle remaining lines after the last common line
         var localTail: [String] = []
         while i < localLines.count {
             localTail.append(localLines[i])
@@ -261,6 +289,8 @@ public final class ConflictResolver: @unchecked Sendable {
     private func longestCommonSubsequence(_ a: [String], _ b: [String]) -> [String] {
         let m = a.count
         let n = b.count
+        guard m > 0, n > 0 else { return [] }
+
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
 
         for i in 1...m {
@@ -273,7 +303,6 @@ public final class ConflictResolver: @unchecked Sendable {
             }
         }
 
-        // Backtrack to find the LCS
         var result: [String] = []
         var i = m, j = n
         while i > 0 && j > 0 {
