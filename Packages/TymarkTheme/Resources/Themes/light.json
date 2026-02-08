@@ -1,0 +1,148 @@
+{
+  "id": "light",
+  "name": "Light",
+  "identifier": "light",
+  "is_built_in": true,
+  "colors": {
+    "background": {
+      "red": 1.0,
+      "green": 1.0,
+      "blue": 1.0,
+      "alpha": 1.0
+    },
+    "text": {
+      "red": 0.0,
+      "green": 0.0,
+      "blue": 0.0,
+      "alpha": 1.0
+    },
+    "secondary_text": {
+      "red": 0.5,
+      "green": 0.5,
+      "blue": 0.5,
+      "alpha": 1.0
+    },
+    "accent": {
+      "red": 0.0,
+      "green": 0.48,
+      "blue": 1.0,
+      "alpha": 1.0
+    },
+    "link": {
+      "red": 0.0,
+      "green": 0.48,
+      "blue": 1.0,
+      "alpha": 1.0
+    },
+    "code_background": {
+      "red": 0.95,
+      "green": 0.95,
+      "blue": 0.95,
+      "alpha": 1.0
+    },
+    "code_text": {
+      "red": 0.0,
+      "green": 0.0,
+      "blue": 0.0,
+      "alpha": 1.0
+    },
+    "heading": {
+      "red": 0.0,
+      "green": 0.0,
+      "blue": 0.0,
+      "alpha": 1.0
+    },
+    "quote_border": {
+      "red": 0.8,
+      "green": 0.8,
+      "blue": 0.8,
+      "alpha": 1.0
+    },
+    "quote_text": {
+      "red": 0.4,
+      "green": 0.4,
+      "blue": 0.4,
+      "alpha": 1.0
+    },
+    "list_marker": {
+      "red": 0.5,
+      "green": 0.5,
+      "blue": 0.5,
+      "alpha": 1.0
+    },
+    "syntax_hidden": {
+      "red": 0.8,
+      "green": 0.8,
+      "blue": 0.8,
+      "alpha": 0.3
+    },
+    "selection": {
+      "red": 0.0,
+      "green": 0.48,
+      "blue": 1.0,
+      "alpha": 0.3
+    },
+    "cursor": {
+      "red": 0.0,
+      "green": 0.0,
+      "blue": 0.0,
+      "alpha": 1.0
+    },
+    "sidebar_background": {
+      "red": 0.95,
+      "green": 0.95,
+      "blue": 0.95,
+      "alpha": 1.0
+    },
+    "sidebar_text": {
+      "red": 0.0,
+      "green": 0.0,
+      "blue": 0.0,
+      "alpha": 1.0
+    }
+  },
+  "fonts": {
+    "body": {
+      "family": "SF Pro",
+      "size": 14,
+      "weight": "Regular",
+      "is_italic": false
+    },
+    "heading": {
+      "family": "SF Pro",
+      "size": 16,
+      "weight": "Bold",
+      "is_italic": false
+    },
+    "code": {
+      "family": "SF Mono",
+      "size": 13,
+      "weight": "Regular",
+      "is_italic": false
+    },
+    "quote": {
+      "family": "SF Pro",
+      "size": 14,
+      "weight": "Regular",
+      "is_italic": true
+    }
+  },
+  "spacing": {
+    "paragraph_spacing": 8,
+    "line_height": 1.6,
+    "heading_spacing_top": 24,
+    "heading_spacing_bottom": 12,
+    "list_indentation": 24,
+    "blockquote_indentation": 16,
+    "code_block_padding": 12
+  },
+  "editor": {
+    "show_line_numbers": false,
+    "show_invisibles": false,
+    "wrap_lines": true,
+    "tab_width": 4,
+    "use_spaces_for_tabs": true,
+    "focus_mode": false,
+    "typewriter_mode": false
+  }
+}
