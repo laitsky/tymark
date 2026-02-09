@@ -179,6 +179,22 @@ public final class ASTToAttributedString {
         case .html:
             result.append(convertHTML(node, source: source))
 
+        // Phase 7: New node types
+        case .math(let display):
+            result.append(convertMath(node, display: display, source: source))
+
+        case .footnoteReference(let id):
+            result.append(convertFootnoteReference(id: id))
+
+        case .footnoteDefinition(let id):
+            result.append(convertFootnoteDefinition(node, id: id, source: source))
+
+        case .frontMatter:
+            result.append(convertFrontMatter(node, source: source))
+
+        case .mermaid:
+            result.append(convertMermaid(node, source: source))
+
         case .custom:
             // Just render children for custom nodes
             for child in node.children {
@@ -520,6 +536,120 @@ public final class ASTToAttributedString {
                 .foregroundColor: context.blockquoteColor
             ]
         )
+    }
+
+    // MARK: - Phase 7 Converters
+
+    private func convertMath(_ node: TymarkNode, display: Bool, source: String) -> NSAttributedString {
+        let content = node.content
+
+        let font = display
+            ? TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 1.2)
+            : context.baseFont
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        if display {
+            paragraphStyle.alignment = .center
+            paragraphStyle.paragraphSpacingBefore = 8
+            paragraphStyle.paragraphSpacing = 8
+        }
+
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: context.baseColor
+        ]
+
+        if display {
+            attributes[.paragraphStyle] = paragraphStyle
+        }
+
+        // Render as styled math placeholder with LaTeX content
+        let displayText = display ? content : content
+        let result = NSMutableAttributedString(string: displayText, attributes: attributes)
+
+        if display {
+            result.append(NSAttributedString(string: "\n"))
+        }
+
+        return result
+    }
+
+    private func convertFootnoteReference(id: String) -> NSAttributedString {
+        // Render as superscript number
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.75),
+            .foregroundColor: context.linkColor,
+            .superscript: 1
+        ]
+
+        return NSAttributedString(string: "[\(id)]", attributes: attributes)
+    }
+
+    private func convertFootnoteDefinition(_ node: TymarkNode, id: String, source: String) -> NSAttributedString {
+        let content = node.content
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.headIndent = 20
+        paragraphStyle.firstLineHeadIndent = 0
+        paragraphStyle.paragraphSpacingBefore = 4
+
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.85, weight: .bold),
+            .foregroundColor: context.linkColor,
+            .superscript: 1
+        ]
+
+        let contentAttrs: [NSAttributedString.Key: Any] = [
+            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.9),
+            .foregroundColor: context.baseColor,
+            .paragraphStyle: paragraphStyle
+        ]
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: "[\(id)] ", attributes: labelAttrs))
+        result.append(NSAttributedString(string: content, attributes: contentAttrs))
+        result.append(NSAttributedString(string: "\n"))
+
+        return result
+    }
+
+    private func convertFrontMatter(_ node: TymarkNode, source: String) -> NSAttributedString {
+        let content = node.content
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: context.codeFont,
+            .foregroundColor: context.blockquoteColor,
+            .backgroundColor: context.codeBackgroundColor
+        ]
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: "---\n", attributes: attributes))
+        result.append(NSAttributedString(string: content, attributes: attributes))
+        result.append(NSAttributedString(string: "---\n", attributes: attributes))
+
+        return result
+    }
+
+    private func convertMermaid(_ node: TymarkNode, source: String) -> NSAttributedString {
+        let content = node.content
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: context.codeFont,
+            .foregroundColor: context.baseColor,
+            .backgroundColor: context.codeBackgroundColor
+        ]
+
+        let result = NSMutableAttributedString()
+        // Show as a labeled code block placeholder
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.85, weight: .medium),
+            .foregroundColor: context.linkColor
+        ]
+        result.append(NSAttributedString(string: "[Mermaid Diagram]\n", attributes: labelAttrs))
+        result.append(NSAttributedString(string: content, attributes: attributes))
+        result.append(NSAttributedString(string: "\n"))
+
+        return result
     }
 
     // MARK: - Helpers

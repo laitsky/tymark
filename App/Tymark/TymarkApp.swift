@@ -6,6 +6,7 @@ import TymarkTheme
 import TymarkWorkspace
 import TymarkSync
 import TymarkExport
+import TymarkAI
 
 // MARK: - Tymark App
 
@@ -48,6 +49,22 @@ final class AppState: ObservableObject {
     @Published var exportError: String?
     @Published var pendingExportFormat: String?
     @Published var isFocusModeEnabled = false
+    @Published var sourceModeShouldToggle = false
+
+    // Phase 6: Zen mode, Find/Replace, Statistics
+    @Published var isZenModeEnabled = false
+    @Published var isFindBarVisible = false
+    @Published var isStatisticsBarVisible = false
+    @Published var documentStatistics = DocumentStatistics()
+    let zenModeController = ZenModeController()
+
+    // Phase 8: AI Writing Assistant
+    @Published var aiAssistantState = AIAssistantState()
+    let aiConfiguration = AIConfiguration()
+    let aiPrivacyManager = AIPrivacyManager()
+
+    /// Reference to the active text manipulator (the focused TymarkTextView).
+    weak var activeTextManipulator: (any TextManipulating)?
 
     let spotlightIndexer = SpotlightIndexer()
     let exportManager = ExportManager()
@@ -220,195 +237,220 @@ final class AppState: ObservableObject {
                 id: "view.toggleSourceMode",
                 name: "Toggle Source Mode",
                 category: .view,
-                defaultShortcut: "cmd+/",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+/"
+            ) { [weak self] in
+                // Source mode toggled via EditorViewModel in ContentView
+                self?.sourceModeShouldToggle = true
+            },
 
             CommandDefinition(
                 id: "view.zoomIn",
                 name: "Zoom In",
                 category: .view,
-                defaultShortcut: "cmd+=",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+="
+            ) { [weak self] in
+                self?.activeTextManipulator?.zoomIn()
+            },
 
             CommandDefinition(
                 id: "view.zoomOut",
                 name: "Zoom Out",
                 category: .view,
-                defaultShortcut: "cmd+-",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+-"
+            ) { [weak self] in
+                self?.activeTextManipulator?.zoomOut()
+            },
 
             CommandDefinition(
                 id: "view.resetZoom",
                 name: "Reset Zoom",
                 category: .view,
-                defaultShortcut: "cmd+0",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+0"
+            ) { [weak self] in
+                self?.activeTextManipulator?.resetZoom()
+            },
 
             // Format commands
             CommandDefinition(
                 id: "format.bold",
                 name: "Bold",
                 category: .format,
-                defaultShortcut: "cmd+b",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+b"
+            ) { [weak self] in
+                self?.activeTextManipulator?.wrapSelection(prefix: "**", suffix: "**")
+            },
 
             CommandDefinition(
                 id: "format.italic",
                 name: "Italic",
                 category: .format,
-                defaultShortcut: "cmd+i",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+i"
+            ) { [weak self] in
+                self?.activeTextManipulator?.wrapSelection(prefix: "*", suffix: "*")
+            },
 
             CommandDefinition(
                 id: "format.strikethrough",
                 name: "Strikethrough",
                 category: .format,
-                defaultShortcut: "cmd+shift+x",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+x"
+            ) { [weak self] in
+                self?.activeTextManipulator?.wrapSelection(prefix: "~~", suffix: "~~")
+            },
 
             CommandDefinition(
                 id: "format.inlineCode",
                 name: "Inline Code",
                 category: .format,
-                defaultShortcut: "cmd+e",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+e"
+            ) { [weak self] in
+                self?.activeTextManipulator?.wrapSelection(prefix: "`", suffix: "`")
+            },
 
             CommandDefinition(
                 id: "format.link",
                 name: "Insert Link",
                 category: .format,
-                defaultShortcut: "cmd+k",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+k"
+            ) { [weak self] in
+                self?.activeTextManipulator?.insertLink(url: "https://")
+            },
 
             CommandDefinition(
                 id: "format.heading1",
                 name: "Heading 1",
                 category: .format,
-                defaultShortcut: "cmd+1",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+1"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("# ")
+            },
 
             CommandDefinition(
                 id: "format.heading2",
                 name: "Heading 2",
                 category: .format,
-                defaultShortcut: "cmd+2",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+2"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("## ")
+            },
 
             CommandDefinition(
                 id: "format.heading3",
                 name: "Heading 3",
                 category: .format,
-                defaultShortcut: "cmd+3",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+3"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("### ")
+            },
 
             CommandDefinition(
                 id: "format.heading4",
                 name: "Heading 4",
                 category: .format,
-                defaultShortcut: "cmd+4",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+4"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("#### ")
+            },
 
             CommandDefinition(
                 id: "format.heading5",
                 name: "Heading 5",
                 category: .format,
-                defaultShortcut: "cmd+5",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+5"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("##### ")
+            },
 
             CommandDefinition(
                 id: "format.heading6",
                 name: "Heading 6",
                 category: .format,
-                defaultShortcut: "cmd+6",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+6"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("###### ")
+            },
 
             CommandDefinition(
                 id: "format.orderedList",
                 name: "Ordered List",
                 category: .format,
-                defaultShortcut: "cmd+shift+7",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+7"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("1. ")
+            },
 
             CommandDefinition(
                 id: "format.unorderedList",
                 name: "Unordered List",
                 category: .format,
-                defaultShortcut: "cmd+shift+8",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+8"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("- ")
+            },
 
             CommandDefinition(
                 id: "format.taskList",
                 name: "Task List",
                 category: .format,
-                defaultShortcut: "cmd+shift+9",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+9"
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("- [ ] ")
+            },
 
             CommandDefinition(
                 id: "format.blockquote",
                 name: "Blockquote",
                 category: .format,
-                defaultShortcut: "cmd+shift+.",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+."
+            ) { [weak self] in
+                self?.activeTextManipulator?.toggleLinePrefix("> ")
+            },
 
             CommandDefinition(
                 id: "format.codeBlock",
                 name: "Code Block",
                 category: .format,
-                defaultShortcut: "cmd+shift+c",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+c"
+            ) { [weak self] in
+                self?.activeTextManipulator?.insertAtCursor("\n```\n\n```\n")
+            },
 
             CommandDefinition(
                 id: "format.horizontalRule",
                 name: "Horizontal Rule",
                 category: .format,
-                defaultShortcut: "cmd+shift+-",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+-"
+            ) { [weak self] in
+                self?.activeTextManipulator?.insertAtCursor("\n---\n")
+            },
 
             // Navigate commands
             CommandDefinition(
                 id: "navigate.moveLineUp",
                 name: "Move Line Up",
                 category: .navigate,
-                defaultShortcut: "alt+up",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "alt+up"
+            ) { [weak self] in
+                self?.activeTextManipulator?.moveLineUp()
+            },
 
             CommandDefinition(
                 id: "navigate.moveLineDown",
                 name: "Move Line Down",
                 category: .navigate,
-                defaultShortcut: "alt+down",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "alt+down"
+            ) { [weak self] in
+                self?.activeTextManipulator?.moveLineDown()
+            },
 
             CommandDefinition(
                 id: "navigate.duplicateLine",
                 name: "Duplicate Line",
                 category: .navigate,
-                defaultShortcut: "cmd+shift+d",
-                isEnabled: { false }
-            ) { },
+                defaultShortcut: "cmd+shift+d"
+            ) { [weak self] in
+                self?.activeTextManipulator?.duplicateLine()
+            },
 
             // Export commands
             CommandDefinition(
@@ -445,6 +487,117 @@ final class AppState: ObservableObject {
                 self?.pendingExportFormat = "rtf"
             },
 
+            // Phase 6: Find & Replace commands
+            CommandDefinition(
+                id: "edit.find",
+                name: "Find",
+                category: .edit,
+                defaultShortcut: "cmd+f"
+            ) { [weak self] in
+                self?.isFindBarVisible = true
+            },
+
+            CommandDefinition(
+                id: "edit.findAndReplace",
+                name: "Find and Replace",
+                category: .edit,
+                defaultShortcut: "cmd+h"
+            ) { [weak self] in
+                self?.isFindBarVisible = true
+            },
+
+            CommandDefinition(
+                id: "edit.findNext",
+                name: "Find Next",
+                category: .edit,
+                defaultShortcut: "cmd+g"
+            ) { [weak self] in
+                if let textView = self?.activeTextManipulator as? TymarkTextView {
+                    textView.findReplaceEngine.findNext()
+                }
+            },
+
+            CommandDefinition(
+                id: "edit.findPrevious",
+                name: "Find Previous",
+                category: .edit,
+                defaultShortcut: "cmd+shift+g"
+            ) { [weak self] in
+                if let textView = self?.activeTextManipulator as? TymarkTextView {
+                    textView.findReplaceEngine.findPrevious()
+                }
+            },
+
+            // Phase 6: Zen mode
+            CommandDefinition(
+                id: "view.zenMode",
+                name: "Toggle Zen Mode",
+                category: .view,
+                defaultShortcut: "cmd+shift+return"
+            ) { [weak self] in
+                self?.isZenModeEnabled.toggle()
+                self?.zenModeController.toggle(window: NSApp.keyWindow)
+            },
+
+            // Phase 6: Statistics
+            CommandDefinition(
+                id: "view.toggleStatistics",
+                name: "Toggle Statistics Bar",
+                category: .view
+            ) { [weak self] in
+                self?.isStatisticsBarVisible.toggle()
+            },
+
+            // Phase 8: AI commands
+            CommandDefinition(
+                id: "ai.togglePanel",
+                name: "Toggle AI Assistant",
+                category: .tools,
+                defaultShortcut: "cmd+shift+a"
+            ) { [weak self] in
+                self?.aiAssistantState.isVisible.toggle()
+            },
+
+            CommandDefinition(
+                id: "ai.complete",
+                name: "AI: Complete",
+                category: .tools
+            ) { [weak self] in
+                self?.runAITask(.complete)
+            },
+
+            CommandDefinition(
+                id: "ai.summarize",
+                name: "AI: Summarize",
+                category: .tools
+            ) { [weak self] in
+                self?.runAITask(.summarize)
+            },
+
+            CommandDefinition(
+                id: "ai.rewrite",
+                name: "AI: Rewrite",
+                category: .tools
+            ) { [weak self] in
+                self?.runAITask(.rewrite)
+            },
+
+            CommandDefinition(
+                id: "ai.fixGrammar",
+                name: "AI: Fix Grammar",
+                category: .tools
+            ) { [weak self] in
+                self?.runAITask(.fixGrammar)
+            },
+
+            CommandDefinition(
+                id: "ai.translate",
+                name: "AI: Translate",
+                category: .tools
+            ) { [weak self] in
+                self?.runAITask(.translate)
+            },
+
             // Tools
             CommandDefinition(
                 id: "tools.toggleVimMode",
@@ -463,10 +616,134 @@ final class AppState: ObservableObject {
     func openDocument() {
         NSDocumentController.shared.openDocument(nil)
     }
+
+    func runAITask(_ taskType: AITaskType) {
+        aiAssistantState.selectedTask = taskType
+        aiAssistantState.isVisible = true
+
+        if let manipulator = activeTextManipulator {
+            let selected = manipulator.selectedText
+            let context = manipulator.fullText
+            aiAssistantState.run(
+                text: selected.isEmpty ? context : selected,
+                context: selected.isEmpty ? "" : context,
+                configuration: aiConfiguration
+            )
+        }
+    }
+}
+
+// MARK: - AI Assistant State (Phase 8)
+
+@MainActor
+final class AIAssistantState: ObservableObject {
+    @Published var isVisible: Bool = false
+    @Published var selectedTask: AITaskType = .complete
+    @Published var responseText: String = ""
+    @Published var isProcessing: Bool = false
+    @Published var errorMessage: String?
+    @Published var cursorVisible: Bool = true
+    @Published var isUsingCloud: Bool = false
+
+    private var currentEngine: (any AIServiceProtocol)?
+    private var cursorTimer: Timer?
+
+    /// Callback to insert accepted text into the editor.
+    var onAcceptResponse: ((String) -> Void)?
+
+    init() {
+        // Cursor blink timer
+        cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.cursorVisible.toggle()
+            }
+        }
+    }
+
+    deinit {
+        cursorTimer?.invalidate()
+    }
+
+    func run(text: String, context: String, configuration: AIConfiguration) {
+        guard !text.isEmpty else { return }
+
+        responseText = ""
+        errorMessage = nil
+        isProcessing = true
+
+        let engine: any AIServiceProtocol
+        switch configuration.selectedEngine {
+        case .cloud:
+            if configuration.hasAPIKey {
+                engine = CloudAIEngine(configuration: configuration)
+                isUsingCloud = true
+            } else {
+                errorMessage = "API key not configured. Set your API key in Settings to use Cloud AI."
+                isProcessing = false
+                return
+            }
+        case .auto:
+            if configuration.hasAPIKey {
+                engine = CloudAIEngine(configuration: configuration)
+                isUsingCloud = true
+            } else {
+                engine = LocalAIEngine()
+                isUsingCloud = false
+            }
+        case .local:
+            engine = LocalAIEngine()
+            isUsingCloud = false
+        }
+        currentEngine = engine
+
+        let request = AIRequest(
+            taskType: selectedTask,
+            inputText: text,
+            context: context
+        )
+
+        Task {
+            do {
+                for try await response in engine.process(request) {
+                    switch response.type {
+                    case .partial(let text):
+                        self.responseText = text
+                    case .complete(let text):
+                        self.responseText = text
+                        self.isProcessing = false
+                    case .error(let message):
+                        self.errorMessage = message
+                        self.isProcessing = false
+                    }
+                }
+                self.isProcessing = false
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.isProcessing = false
+            }
+        }
+    }
+
+    func cancel() {
+        currentEngine?.cancel()
+        isProcessing = false
+    }
+
+    func acceptResponse() {
+        onAcceptResponse?(responseText)
+        responseText = ""
+    }
+
+    func discardResponse() {
+        responseText = ""
+        errorMessage = nil
+    }
 }
 
 // MARK: - Document Model (ReferenceFileDocument)
 
+// @unchecked Sendable: Safe because ReferenceFileDocument is always accessed
+// from the main thread by SwiftUI's document infrastructure.
 final class TymarkDocumentModel: ReferenceFileDocument, @unchecked Sendable {
 
     @Published var content: String {
@@ -559,20 +836,50 @@ struct ContentView: View {
                     .environmentObject(appState.workspaceManager)
             }
         } detail: {
-            ZStack(alignment: .bottom) {
-                TymarkEditorView(
-                    text: $document.content,
-                    selection: $selection,
-                    viewModel: editorViewModel,
-                    keybindingHandler: appState.keybindingHandler,
-                    vimModeHandler: appState.vimModeHandler
-                )
-                .frame(minWidth: 400, minHeight: 300)
-
-                // Vim mode status bar
-                if appState.vimModeHandler.isEnabled {
-                    VimStatusBar(handler: appState.vimModeHandler)
+            VStack(spacing: 0) {
+                // Find/Replace bar (Phase 6)
+                if appState.isFindBarVisible,
+                   let textView = appState.activeTextManipulator as? TymarkTextView {
+                    FindReplaceBar(
+                        engine: textView.findReplaceEngine,
+                        isVisible: $appState.isFindBarVisible
+                    )
                 }
+
+                ZStack(alignment: .bottom) {
+                    TymarkEditorView(
+                        text: $document.content,
+                        selection: $selection,
+                        viewModel: editorViewModel,
+                        keybindingHandler: appState.keybindingHandler,
+                        vimModeHandler: appState.vimModeHandler,
+                        onTextManipulatorReady: { manipulator in
+                            appState.activeTextManipulator = manipulator
+                            // Attach find engine to the text view
+                            if let tv = manipulator as? TymarkTextView {
+                                tv.findReplaceEngine.attach(to: tv)
+                            }
+                        },
+                        documentURL: fileURL
+                    )
+                    .frame(minWidth: 400, minHeight: 300)
+
+                    // Vim mode status bar
+                    if appState.vimModeHandler.isEnabled {
+                        VimStatusBar(handler: appState.vimModeHandler)
+                    }
+                }
+
+                // Statistics bar (Phase 6)
+                if appState.isStatisticsBarVisible {
+                    DocumentStatisticsBar(statistics: appState.documentStatistics)
+                }
+            }
+
+            // AI Assistant Panel (Phase 8)
+            if appState.aiAssistantState.isVisible {
+                AIAssistantPanel(state: appState.aiAssistantState)
+                    .environmentObject(appState)
             }
         }
         .toolbar {
@@ -660,6 +967,10 @@ struct ContentView: View {
         }
         .onAppear {
             editorViewModel.setTheme(appState.themeManager.currentTheme)
+            // Wire AI accept response callback
+            appState.aiAssistantState.onAcceptResponse = { [weak appState] text in
+                appState?.activeTextManipulator?.insertAtCursor(text)
+            }
         }
         .onChange(of: document.content) { _, newValue in
             // Index updated content in Spotlight using real document URL
@@ -670,11 +981,19 @@ struct ContentView: View {
                     title: document.metadata.title
                 )
             }
+            // Update statistics (Phase 6)
+            appState.documentStatistics = DocumentStatisticsEngine.compute(from: newValue)
         }
         .onChange(of: appState.pendingExportFormat) { _, newValue in
             guard let format = newValue else { return }
             exportDocument(format: format)
             appState.pendingExportFormat = nil
+        }
+        .onChange(of: appState.sourceModeShouldToggle) { _, newValue in
+            if newValue {
+                editorViewModel.toggleSourceMode()
+                appState.sourceModeShouldToggle = false
+            }
         }
     }
 
@@ -1073,19 +1392,196 @@ struct QuickOpenView: View {
     @Binding var isVisible: Bool
     @EnvironmentObject var workspaceManager: WorkspaceManager
     @State private var searchText = ""
+    @State private var selectedIndex = 0
+    @FocusState private var isSearchFieldFocused: Bool
+
+    private let searchEngine = FuzzySearchEngine()
+    @State private var isIndexed = false
+
+    var searchResults: [SearchResult] {
+        guard !searchText.isEmpty, isIndexed else { return [] }
+        return searchEngine.quickOpen(query: searchText)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Search files...", text: $searchText)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding()
-
-            List {
-                Text("Files matching '\(searchText)'")
+            // Search field
+            HStack {
+                Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
+                TextField("Search files...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16))
+                    .focused($isSearchFieldFocused)
+                    .onSubmit {
+                        openSelectedFile()
+                    }
+                Button {
+                    isVisible = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(12)
+            .background(Color(.controlBackgroundColor))
+
+            Divider()
+
+            // Results list
+            if searchText.isEmpty {
+                // Show recent files
+                List {
+                    Section(header: Text("Recent Files").font(.caption)) {
+                        ForEach(workspaceManager.currentWorkspace?.recentFiles ?? [], id: \.self) { url in
+                            HStack {
+                                Image(systemName: "doc.text")
+                                    .foregroundColor(.secondary)
+                                Text(url.lastPathComponent)
+                                Spacer()
+                                Text(url.deletingLastPathComponent().lastPathComponent)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                NSDocumentController.shared.openDocument(
+                                    withContentsOf: url,
+                                    display: true
+                                ) { _, _, _ in }
+                                isVisible = false
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            } else {
+                let results = searchResults
+                if results.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text("No files found")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                } else {
+                    List(Array(results.enumerated()), id: \.element.id) { index, result in
+                        HStack {
+                            Image(systemName: result.file.isDirectory ? "folder" : "doc.text")
+                                .foregroundColor(result.file.isDirectory ? .blue : .secondary)
+                            Text(result.file.name)
+                                .font(.system(size: 13))
+                            Spacer()
+                            Text(String(format: "%.0f%%", result.score * 100))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                        .background(index == selectedIndex ? Color.accentColor.opacity(0.1) : Color.clear)
+                        .cornerRadius(4)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            openFile(result.file)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
             }
         }
-        .frame(width: 600, height: 400)
+        .frame(width: 550, height: 400)
+        .onAppear {
+            isSearchFieldFocused = true
+            searchEngine.index(workspaceManager.currentWorkspace?.openFiles ?? [])
+            isIndexed = true
+        }
+        .onChange(of: workspaceManager.currentWorkspace?.openFiles) { _, newFiles in
+            searchEngine.index(newFiles ?? [])
+        }
+        .onChange(of: searchText) { _, _ in
+            selectedIndex = 0
+        }
+        .onKeyPress(.upArrow) {
+            if selectedIndex > 0 { selectedIndex -= 1 }
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            let count = searchResults.count
+            if selectedIndex < count - 1 { selectedIndex += 1 }
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            isVisible = false
+            return .handled
+        }
+    }
+
+    private func openSelectedFile() {
+        let results = searchResults
+        guard selectedIndex < results.count else { return }
+        openFile(results[selectedIndex].file)
+    }
+
+    private func openFile(_ file: WorkspaceFile) {
+        NSDocumentController.shared.openDocument(
+            withContentsOf: file.url,
+            display: true
+        ) { _, _, _ in }
+        isVisible = false
+    }
+}
+
+// MARK: - Document Statistics Bar (Phase 6)
+
+struct DocumentStatisticsBar: View {
+    let statistics: DocumentStatistics
+
+    var body: some View {
+        HStack(spacing: 16) {
+            StatItem(label: "Words", value: "\(statistics.wordCount)")
+            Divider().frame(height: 12)
+            StatItem(label: "Characters", value: "\(statistics.characterCount)")
+            Divider().frame(height: 12)
+            StatItem(label: "Sentences", value: "\(statistics.sentenceCount)")
+            Divider().frame(height: 12)
+            StatItem(label: "Lines", value: "\(statistics.lineCount)")
+            Divider().frame(height: 12)
+            StatItem(label: "Read time", value: readingTimeText)
+            Spacer()
+        }
+        .font(.system(size: 11))
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color(.windowBackgroundColor))
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(Color(.separatorColor)),
+            alignment: .top
+        )
+    }
+
+    private var readingTimeText: String {
+        let minutes = statistics.readingTimeMinutes
+        if minutes < 1 {
+            return "< 1 min"
+        }
+        return "~\(Int(ceil(minutes))) min"
+    }
+}
+
+private struct StatItem: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label + ":")
+                .foregroundColor(.secondary)
+            Text(value)
+        }
     }
 }
 
@@ -1120,8 +1616,15 @@ struct SettingsView: View {
             ExportSettingsView()
                 .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
                 .tag(5)
+
+            AISettingsView(
+                configuration: appState.aiConfiguration,
+                privacyManager: appState.aiPrivacyManager
+            )
+            .tabItem { Label("AI", systemImage: "sparkles") }
+            .tag(6)
         }
-        .frame(width: 560, height: 450)
+        .frame(width: 560, height: 500)
     }
 }
 

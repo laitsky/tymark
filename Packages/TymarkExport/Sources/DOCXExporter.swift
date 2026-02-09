@@ -268,6 +268,36 @@ public final class DOCXExporter: Exporter {
         case .table:
             return convertTable(node, theme: theme)
 
+        // Phase 7: New node types
+        case .math(let display):
+            let content = display ? "[\(node.content)]" : node.content
+            let run = textRun(escapeXML(content), italic: true)
+            return paragraph(runs: run)
+
+        case .footnoteReference:
+            return "" // Inline - handled at inline level
+
+        case .footnoteDefinition(let id):
+            let labelRun = textRun(escapeXML("[\(id)] "), bold: true)
+            let contentRun = textRun(escapeXML(node.content))
+            return paragraph(runs: labelRun + contentRun)
+
+        case .frontMatter:
+            let lines = node.content.components(separatedBy: "\n")
+            return lines.map { line in
+                let run = textRun(escapeXML(line))
+                return paragraph(runs: run, style: "CodeBlock")
+            }.joined()
+
+        case .mermaid:
+            let labelRun = textRun(escapeXML("[Mermaid Diagram]"), italic: true)
+            let codeLines = node.content.components(separatedBy: "\n")
+            var xml = paragraph(runs: labelRun)
+            for line in codeLines {
+                xml += paragraph(runs: textRun(escapeXML(line)), style: "CodeBlock")
+            }
+            return xml
+
         default:
             return node.children.map { convertNode($0, theme: theme, depth: depth) }.joined()
         }
@@ -384,6 +414,18 @@ public final class DOCXExporter: Exporter {
 
         case .lineBreak:
             return "<w:r><w:br/></w:r>"
+
+        // Phase 7: Inline footnote reference
+        case .footnoteReference(let id):
+            return """
+            <w:r>
+                <w:rPr><w:vertAlign w:val="superscript"/></w:rPr>
+                <w:t xml:space="preserve">\(escapeXML("[\(id)]"))</w:t>
+            </w:r>
+            """
+
+        case .math:
+            return textRun(escapeXML(node.content), italic: true)
 
         default:
             return node.children.map { convertInlineNode($0, theme: theme) }.joined()

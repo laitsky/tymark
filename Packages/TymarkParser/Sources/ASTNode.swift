@@ -24,6 +24,12 @@ public enum TymarkNodeType: Equatable, Hashable {
     case tableCell
     case strikethrough
     case html
+    // Phase 7: New node types
+    case math(display: Bool)              // $...$ (inline) or $$...$$ (block display)
+    case footnoteReference(id: String)    // [^id]
+    case footnoteDefinition(id: String)   // [^id]: content
+    case frontMatter                      // --- yaml ---
+    case mermaid                          // ```mermaid ... ```
     case custom(name: String)
 }
 
@@ -93,8 +99,11 @@ extension TymarkNode {
     public var isBlock: Bool {
         switch type {
         case .document, .paragraph, .heading, .blockquote, .list, .listItem,
-             .codeBlock, .thematicBreak, .table, .tableRow, .tableCell, .html:
+             .codeBlock, .thematicBreak, .table, .tableRow, .tableCell, .html,
+             .frontMatter, .mermaid, .footnoteDefinition:
             return true
+        case .math(let display):
+            return display
         default:
             return false
         }
@@ -103,8 +112,10 @@ extension TymarkNode {
     public var isInline: Bool {
         switch type {
         case .text, .emphasis, .strong, .inlineCode, .link, .image,
-             .softBreak, .lineBreak, .strikethrough:
+             .softBreak, .lineBreak, .strikethrough, .footnoteReference:
             return true
+        case .math(let display):
+            return !display
         default:
             return false
         }

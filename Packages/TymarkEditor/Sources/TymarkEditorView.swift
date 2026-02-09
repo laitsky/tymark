@@ -13,6 +13,10 @@ public struct TymarkEditorView: NSViewRepresentable {
     @ObservedObject public var viewModel: EditorViewModel
     public var keybindingHandler: KeybindingHandler?
     public var vimModeHandler: VimModeHandler?
+    /// Callback invoked when the text view is created, providing a TextManipulating reference.
+    public var onTextManipulatorReady: ((any TextManipulating) -> Void)?
+    /// The URL of the current document, used for image paste.
+    public var documentURL: URL?
 
     // MARK: - Initialization
 
@@ -21,13 +25,17 @@ public struct TymarkEditorView: NSViewRepresentable {
         selection: Binding<NSRange> = .constant(NSRange(location: 0, length: 0)),
         viewModel: EditorViewModel,
         keybindingHandler: KeybindingHandler? = nil,
-        vimModeHandler: VimModeHandler? = nil
+        vimModeHandler: VimModeHandler? = nil,
+        onTextManipulatorReady: ((any TextManipulating) -> Void)? = nil,
+        documentURL: URL? = nil
     ) {
         self._text = text
         self._selection = selection
         self.viewModel = viewModel
         self.keybindingHandler = keybindingHandler
         self.vimModeHandler = vimModeHandler
+        self.onTextManipulatorReady = onTextManipulatorReady
+        self.documentURL = documentURL
     }
 
     // MARK: - NSViewRepresentable
@@ -55,12 +63,16 @@ public struct TymarkEditorView: NSViewRepresentable {
         textView.setMarkdown(text)
         textView.keybindingHandler = keybindingHandler
         textView.vimModeHandler = vimModeHandler
+        textView.documentURL = documentURL
 
         // Set the coordinator as delegate
         textView.delegate = context.coordinator
 
         // Store reference in coordinator
         context.coordinator.textView = textView
+
+        // Notify that TextManipulating is ready
+        onTextManipulatorReady?(textView)
 
         // Set the document view
         scrollView.documentView = textView
@@ -89,6 +101,9 @@ public struct TymarkEditorView: NSViewRepresentable {
         if textView.vimModeHandler !== vimModeHandler {
             textView.vimModeHandler = vimModeHandler
         }
+
+        // Update document URL for image paste
+        textView.documentURL = documentURL
 
         // Update selection if needed
         let currentSelection = textView.selectedRange()

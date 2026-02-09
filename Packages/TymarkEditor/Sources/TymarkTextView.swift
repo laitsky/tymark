@@ -16,6 +16,26 @@ public final class TymarkTextView: NSTextView {
     private var isRenderingInProgress = false
     private var pendingRender = false
 
+    /// Zoom multiplier for font scaling. Persisted to UserDefaults.
+    public var zoomMultiplier: CGFloat {
+        get { UserDefaults.standard.double(forKey: "editorZoomMultiplier").nonZeroOr(1.0) }
+        set { UserDefaults.standard.set(newValue, forKey: "editorZoomMultiplier") }
+    }
+
+    /// Smart typography handler for curly quotes, em-dashes, ellipsis.
+    public let smartTypography = SmartTypographyHandler(
+        isEnabled: UserDefaults.standard.bool(forKey: "enableSmartTypography")
+    )
+
+    /// Find and replace engine for Cmd+F support.
+    public let findReplaceEngine = FindReplaceEngine()
+
+    /// Image paste handler for pasting images from clipboard.
+    public let imagePasteHandler = ImagePasteHandler()
+
+    /// The URL of the current document (set by the coordinator).
+    public var documentURL: URL?
+
     public weak var keybindingHandler: KeybindingHandler?
     public weak var vimModeHandler: VimModeHandler? {
         didSet {
@@ -261,7 +281,50 @@ public final class TymarkTextView: NSTextView {
         super.keyDown(with: event)
     }
 
+    public override func paste(_ sender: Any?) {
+        // Phase 7: Check for image paste
+        if imagePasteHandler.pasteboardContainsImage() {
+            let handled = imagePasteHandler.handleImagePaste(documentURL: documentURL) { [weak self] markdown in
+                self?.insertAtCursor(markdown)
+            }
+            if handled { return }
+        }
+        super.paste(sender)
+    }
+
     public override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        // Smart typography interception
+        if let inputStr = insertString as? String, inputStr.count == 1 {
+            let cursorLoc = selectedRange().location
+            let isInCode = parserState.node(at: cursorLoc).map { node -> Bool in
+                if case .codeBlock = node.type { return true }
+                if case .inlineCode = node.type { return true }
+                return false
+            } ?? false
+
+            let textBefore = cursorLoc > 0
+                ? (string as NSString).substring(to: cursorLoc)
+                : ""
+
+            if let replacement = smartTypography.transform(inputStr, textBefore: textBefore, isInCodeBlock: isInCode) {
+                // Handle em-dash: replace previous dash + current with single atomic operation
+                if inputStr == "-" && textBefore.hasSuffix("-") {
+                    let replaceRange = NSRange(location: cursorLoc - 1, length: 1)
+                    super.insertText(replacement, replacementRange: replaceRange)
+                    return
+                }
+                // Handle ellipsis: replace previous two dots + current with single atomic operation
+                if inputStr == "." && textBefore.hasSuffix("..") {
+                    let replaceRange = NSRange(location: cursorLoc - 2, length: 2)
+                    super.insertText(replacement, replacementRange: replaceRange)
+                    return
+                }
+                // Quotes: just replace the character
+                super.insertText(replacement, replacementRange: replacementRange)
+                return
+            }
+        }
+
         super.insertText(insertString, replacementRange: replacementRange)
 
         // Handle smart pairs and lists
@@ -366,12 +429,27 @@ public final class TymarkTextView: NSTextView {
         return false
     }
 
+    /// Applies the current zoom level by scaling fonts in the rendering context and re-rendering.
+    func applyZoom() {
+        self.renderingContext = Self.makeRenderingContext(theme: theme, zoom: zoomMultiplier)
+        renderDocument()
+    }
+
     private static func makeRenderingContext(theme: Theme) -> RenderingContext {
-        RenderingContext(
+        return makeRenderingContext(theme: theme, zoom: UserDefaults.standard.double(forKey: "editorZoomMultiplier").nonZeroOr(1.0))
+    }
+
+    private static func makeRenderingContext(theme: Theme, zoom: CGFloat) -> RenderingContext {
+        let bodyFont = theme.fonts.body.nsFont
+        let codeFont = theme.fonts.code.nsFont
+        let scaledBody = NSFont(descriptor: bodyFont.fontDescriptor, size: bodyFont.pointSize * zoom) ?? bodyFont
+        let scaledCode = NSFont(descriptor: codeFont.fontDescriptor, size: codeFont.pointSize * zoom) ?? codeFont
+
+        return RenderingContext(
             isSourceMode: false,
-            baseFont: theme.fonts.body.nsFont,
+            baseFont: scaledBody,
             baseColor: theme.colors.text.nsColor,
-            codeFont: theme.fonts.code.nsFont,
+            codeFont: scaledCode,
             linkColor: theme.colors.link.nsColor,
             syntaxHiddenColor: theme.colors.syntaxHidden.nsColor,
             codeBackgroundColor: theme.colors.codeBackground.nsColor,
@@ -414,5 +492,14 @@ extension String {
             return newlineRange.location + 1
         }
         return 0
+    }
+}
+
+// MARK: - Double Extension
+
+extension Double {
+    /// Returns self if non-zero, otherwise the fallback value.
+    func nonZeroOr(_ fallback: Double) -> Double {
+        return self == 0 ? fallback : self
     }
 }

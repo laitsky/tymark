@@ -20,6 +20,9 @@ public final class HTMLExporter: Exporter {
     public init() {}
 
     public func export(document: TymarkParser.TymarkDocument, theme: Theme) -> Data? {
+        // Phase 7: Collect footnotes for rendering at bottom
+        let footnoteNodes = collectFootnoteDefinitions(from: document.root)
+
         let html = """
         <!DOCTYPE html>
         <html lang="en">
@@ -27,13 +30,25 @@ public final class HTMLExporter: Exporter {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Tymark Export</title>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+        <script type="module">
+            import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+            mermaid.initialize({ startOnLoad: true, theme: 'default' });
+        </script>
         <style>
         \(generateCSS(theme: theme))
+        .footnotes { border-top: 1px solid \(theme.colors.quoteBorder.hexString); margin-top: 2em; padding-top: 1em; font-size: 0.9em; }
+        .footnotes ol { padding-left: 1.5em; }
+        .footnote-ref { vertical-align: super; font-size: 0.75em; }
+        .front-matter { background: \(theme.colors.codeBackground.hexString); padding: 12px; border-radius: 4px; margin-bottom: 1em; font-family: monospace; font-size: 0.9em; color: \(theme.colors.secondaryText.hexString); }
         </style>
         </head>
         <body>
         <article class="markdown-body">
         \(convertToHTML(document.root))
+        \(renderFootnotesSection(footnoteNodes))
         </article>
         </body>
         </html>
@@ -42,6 +57,7 @@ public final class HTMLExporter: Exporter {
     }
 
     private func generateCSS(theme: Theme) -> String {
+        // Phase 7: Include KaTeX CSS and Mermaid JS in head
         """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -175,9 +191,56 @@ public final class HTMLExporter: Exporter {
         case .html:
             return node.content
 
+        // Phase 7: New node types
+        case .math(let display):
+            if display {
+                return "<div>$$\(escapeHTML(node.content))$$</div>\n"
+            } else {
+                return "$\(escapeHTML(node.content))$"
+            }
+
+        case .footnoteReference(let id):
+            return "<sup class=\"footnote-ref\"><a href=\"#fn-\(escapeHTML(id))\">\(escapeHTML(id))</a></sup>"
+
+        case .footnoteDefinition:
+            // Rendered in the footnotes section at the bottom
+            return ""
+
+        case .frontMatter:
+            return "<div class=\"front-matter\"><pre>\(escapeHTML(node.content))</pre></div>\n"
+
+        case .mermaid:
+            return "<pre class=\"mermaid\">\(escapeHTML(node.content))</pre>\n"
+
         default:
             return node.children.map(convertToHTML).joined()
         }
+    }
+
+    // Phase 7: Footnote helpers
+
+    private func collectFootnoteDefinitions(from node: TymarkNode) -> [TymarkNode] {
+        var result: [TymarkNode] = []
+        if case .footnoteDefinition = node.type {
+            result.append(node)
+        }
+        for child in node.children {
+            result.append(contentsOf: collectFootnoteDefinitions(from: child))
+        }
+        return result
+    }
+
+    private func renderFootnotesSection(_ definitions: [TymarkNode]) -> String {
+        guard !definitions.isEmpty else { return "" }
+
+        var html = "<section class=\"footnotes\">\n<hr>\n<ol>\n"
+        for node in definitions {
+            if case .footnoteDefinition(let id) = node.type {
+                html += "<li id=\"fn-\(escapeHTML(id))\">\(escapeHTML(node.content))</li>\n"
+            }
+        }
+        html += "</ol>\n</section>\n"
+        return html
     }
 
     private func convertTableContent(_ table: TymarkNode) -> String {

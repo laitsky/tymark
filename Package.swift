@@ -38,6 +38,10 @@ let package = Package(
         .library(
             name: "TymarkHighlighter",
             targets: ["TymarkHighlighter"]
+        ),
+        .library(
+            name: "TymarkAI",
+            targets: ["TymarkAI"]
         )
     ],
     dependencies: [
@@ -54,7 +58,8 @@ let package = Package(
                 "TymarkWorkspace",
                 "TymarkSync",
                 "TymarkExport",
-                "TymarkHighlighter"
+                "TymarkHighlighter",
+                "TymarkAI"
             ],
             path: "App/Tymark",
             swiftSettings: [
@@ -166,6 +171,21 @@ let package = Package(
             name: "TymarkExportTests",
             dependencies: ["TymarkExport"],
             path: "Packages/TymarkExport/Tests"
+        ),
+
+        // MARK: - TymarkAI
+        .target(
+            name: "TymarkAI",
+            dependencies: [],
+            path: "Packages/TymarkAI/Sources",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
+        ),
+        .testTarget(
+            name: "TymarkAITests",
+            dependencies: ["TymarkAI"],
+            path: "Packages/TymarkAI/Tests"
         ),
 
         // MARK: - TymarkHighlighter

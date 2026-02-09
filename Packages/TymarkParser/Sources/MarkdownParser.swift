@@ -41,8 +41,16 @@ public final class MarkdownParser: @unchecked Sendable {
     // MARK: - Public API
 
     public func parse(_ source: String) -> TymarkDocument {
-        let markdownDocument = Document(parsing: source)
-        let root = convertNode(markdownDocument, in: source, baseLocation: 0)
+        // Phase 7: Extract front matter before parsing
+        let (frontMatter, strippedSource) = FrontMatterParser.extract(from: source)
+        let frontMatterOffset = frontMatter != nil ? NSMaxRange(frontMatter!.range) : 0
+
+        let markdownDocument = Document(parsing: strippedSource)
+        var root = convertNode(markdownDocument, in: source, baseLocation: frontMatterOffset)
+
+        // Phase 7: Post-process for additional elements
+        root = postProcess(root, source: source, frontMatter: frontMatter)
+
         return TymarkDocument(root: root, source: source)
     }
 
@@ -66,6 +74,136 @@ public final class MarkdownParser: @unchecked Sendable {
 
         // Fall back to full re-parse
         return parse(newSource)
+    }
+
+    // MARK: - Phase 7 Post-Processing
+
+    private func postProcess(_ root: TymarkNode, source: String, frontMatter: FrontMatter?) -> TymarkNode {
+        var children = root.children
+
+        // 1. Prepend front matter node if present
+        if let fm = frontMatter {
+            let fmNode = TymarkNode(
+                type: .frontMatter,
+                content: fm.raw,
+                range: fm.range,
+                metadata: fm.fields
+            )
+            children.insert(fmNode, at: 0)
+        }
+
+        // 2. Reclassify ```mermaid code blocks as .mermaid nodes
+        children = children.map { reclassifyMermaidBlocks($0) }
+
+        // 3. Inject math nodes ($$...$$ block and $...$ inline)
+        children = injectMathNodes(in: children, source: source, frontMatter: frontMatter)
+
+        // 4. Footnote support
+        let (footnoteRefs, footnoteDefs) = FootnoteSupport.extractFootnotes(from: source)
+        if !footnoteDefs.isEmpty {
+            children.append(contentsOf: footnoteDefs)
+        }
+        // Footnote references are inline - they'll be detected during rendering
+        _ = footnoteRefs // stored for reference if needed
+
+        return TymarkNode(
+            id: root.id,
+            type: root.type,
+            content: root.content,
+            range: NSRange(location: 0, length: (source as NSString).length),
+            children: children,
+            metadata: root.metadata
+        )
+    }
+
+    private func reclassifyMermaidBlocks(_ node: TymarkNode) -> TymarkNode {
+        if case .codeBlock(let language) = node.type, language?.lowercased() == "mermaid" {
+            return TymarkNode(
+                id: node.id,
+                type: .mermaid,
+                content: node.content,
+                range: node.range,
+                metadata: node.metadata
+            )
+        }
+
+        if !node.children.isEmpty {
+            let newChildren = node.children.map { reclassifyMermaidBlocks($0) }
+            return TymarkNode(
+                id: node.id,
+                type: node.type,
+                content: node.content,
+                range: node.range,
+                children: newChildren,
+                metadata: node.metadata
+            )
+        }
+
+        return node
+    }
+
+    private func injectMathNodes(in children: [TymarkNode], source: String, frontMatter: FrontMatter? = nil) -> [TymarkNode] {
+        // Detect $$...$$ block math in the source
+        let nsSource = source as NSString
+        let fmEnd = frontMatter.map { NSMaxRange($0.range) } ?? 0
+
+        // Collect ranges of existing code blocks to avoid matching math inside them
+        let codeBlockRanges: [NSRange] = children.compactMap { node in
+            if case .codeBlock = node.type { return node.range }
+            if case .inlineCode = node.type { return node.range }
+            return nil
+        }
+
+        // Block math: $$...$$
+        let blockMathPattern = try? NSRegularExpression(pattern: "\\$\\$([\\s\\S]*?)\\$\\$", options: [])
+        let blockMatches = blockMathPattern?.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) ?? []
+
+        var mathNodes: [TymarkNode] = []
+        for match in blockMatches {
+            let fullRange = match.range
+
+            // Skip matches inside front matter or code blocks
+            if fullRange.location < fmEnd { continue }
+            if codeBlockRanges.contains(where: { NSIntersectionRange($0, fullRange).length > 0 }) { continue }
+
+            let contentRange = match.range(at: 1)
+            let content = nsSource.substring(with: contentRange)
+            mathNodes.append(TymarkNode(
+                type: .math(display: true),
+                content: content,
+                range: fullRange
+            ))
+        }
+
+        // Inline math: $...$  (single dollar, not preceded/followed by another $)
+        let inlineMathPattern = try? NSRegularExpression(pattern: "(?<!\\$)\\$(?!\\$)([^$\\n]+?)(?<!\\$)\\$(?!\\$)", options: [])
+        let inlineMatches = inlineMathPattern?.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) ?? []
+
+        for match in inlineMatches {
+            let fullRange = match.range
+
+            // Skip matches inside front matter or code blocks
+            if fullRange.location < fmEnd { continue }
+            if codeBlockRanges.contains(where: { NSIntersectionRange($0, fullRange).length > 0 }) { continue }
+
+            let contentRange = match.range(at: 1)
+            let content = nsSource.substring(with: contentRange)
+
+            // Skip if this range overlaps with a block math
+            let overlaps = blockMatches.contains { NSIntersectionRange($0.range, fullRange).length > 0 }
+            if !overlaps {
+                mathNodes.append(TymarkNode(
+                    type: .math(display: false),
+                    content: content,
+                    range: fullRange
+                ))
+            }
+        }
+
+        // Merge math nodes into children (they'll be rendered alongside existing nodes)
+        var result = children
+        result.append(contentsOf: mathNodes)
+        return result
     }
 
     // MARK: - Private Methods
