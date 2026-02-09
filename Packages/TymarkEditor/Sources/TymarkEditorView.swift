@@ -94,6 +94,11 @@ public struct TymarkEditorView: NSViewRepresentable {
             context.coordinator.lastKnownTheme = viewModel.theme
         }
 
+        // Update source mode if changed
+        if textView.isSourceModeEnabled != viewModel.isSourceMode {
+            textView.setSourceMode(viewModel.isSourceMode)
+        }
+
         if textView.keybindingHandler !== keybindingHandler {
             textView.keybindingHandler = keybindingHandler
         }
@@ -108,7 +113,10 @@ public struct TymarkEditorView: NSViewRepresentable {
         // Update selection if needed
         let currentSelection = textView.selectedRange()
         if !NSEqualRanges(currentSelection, selection) {
-            textView.setSelectedRange(selection)
+            let maxLocation = (textView.string as NSString).length
+            let safeLocation = max(0, min(selection.location, maxLocation))
+            let safeLength = max(0, min(selection.length, maxLocation - safeLocation))
+            textView.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
         }
     }
 

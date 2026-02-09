@@ -15,6 +15,12 @@ public final class TymarkTextView: NSTextView {
 
     private var isRenderingInProgress = false
     private var pendingRender = false
+    private var isApplyingInternalUpdate = false
+    private var nodeSyntaxVisibility: [UUID: Bool] = [:]
+    private var isSourceModeEnabledStorage = false
+
+    /// Whether the editor is currently in source mode (shows all markdown syntax).
+    public var isSourceModeEnabled: Bool { isSourceModeEnabledStorage }
 
     /// Zoom multiplier for font scaling. Persisted to UserDefaults.
     public var zoomMultiplier: CGFloat {
@@ -124,9 +130,16 @@ public final class TymarkTextView: NSTextView {
         renderDocument()
     }
 
+    public func setSourceMode(_ enabled: Bool) {
+        guard isSourceModeEnabledStorage != enabled else { return }
+        isSourceModeEnabledStorage = enabled
+        self.renderingContext = Self.makeRenderingContext(theme: theme, zoom: zoomMultiplier, isSourceMode: enabled)
+        renderDocument()
+    }
+
     public func updateTheme(_ newTheme: Theme) {
         self.theme = newTheme
-        self.renderingContext = Self.makeRenderingContext(theme: newTheme)
+        self.renderingContext = Self.makeRenderingContext(theme: newTheme, zoom: zoomMultiplier, isSourceMode: isSourceModeEnabledStorage)
         renderDocument()
     }
 
@@ -150,14 +163,17 @@ public final class TymarkTextView: NSTextView {
 
         // Replace content while preserving selection if possible
         let previousSelection = self.selectedRange()
+        nodeSyntaxVisibility.removeAll(keepingCapacity: true)
 
-        self.textStorage?.setAttributedString(attributedString)
+        performInternalUpdate {
+            self.textStorage?.setAttributedString(attributedString)
 
-        // Restore selection safely by clamping location/length separately.
-        let maxLocation = attributedString.length
-        let safeLocation = max(0, min(previousSelection.location, maxLocation))
-        let safeLength = max(0, min(previousSelection.length, maxLocation - safeLocation))
-        self.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
+            // Restore selection safely by clamping location/length separately.
+            let maxLocation = attributedString.length
+            let safeLocation = max(0, min(previousSelection.location, maxLocation))
+            let safeLength = max(0, min(previousSelection.length, maxLocation - safeLocation))
+            self.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
+        }
 
         isRenderingInProgress = false
 
@@ -185,7 +201,9 @@ public final class TymarkTextView: NSTextView {
             let attributedNode = converter.convertNode(node, source: string)
             // Replace the range in text storage
             if NSMaxRange(node.range) <= (textStorage?.length ?? 0) {
-                textStorage?.replaceCharacters(in: node.range, with: attributedNode)
+                performInternalUpdate {
+                    textStorage?.replaceCharacters(in: node.range, with: attributedNode)
+                }
             }
         }
     }
@@ -195,9 +213,6 @@ public final class TymarkTextView: NSTextView {
     private func updateCursorProximity() {
         let cursorLocation = selectedRange().location
         cursorTracker.updateCursorLocation(cursorLocation)
-
-        // Find nodes near cursor that should show/hide syntax
-        toggleSyntaxVisibility(at: cursorLocation)
     }
 
     private func toggleSyntaxVisibility(at location: Int) {
@@ -217,6 +232,12 @@ public final class TymarkTextView: NSTextView {
     }
 
     private func applySyntaxVisibility(node: TymarkNode, showSource: Bool) {
+        // Skip if we already applied this visibility state for the node.
+        if nodeSyntaxVisibility[node.id] == showSource {
+            return
+        }
+        nodeSyntaxVisibility[node.id] = showSource
+
         // This would toggle the visibility of markdown syntax characters
         // by updating the attributed string attributes
 
@@ -229,32 +250,41 @@ public final class TymarkTextView: NSTextView {
 
         // Only update if there's a change
         if currentSourceMode != showSource {
-            textStorage.beginEditing()
+            performInternalUpdate {
+                textStorage.beginEditing()
 
-            // Update the node content to show/hide syntax
-            let converter = ASTToAttributedString(context: renderingContext)
-            let newAttributed = converter.convertNode(node, source: string)
+                // Update the node content to show/hide syntax
+                let converter = ASTToAttributedString(context: renderingContext)
+                let newAttributed = converter.convertNode(node, source: string)
 
-            // Replace the range
-            if NSMaxRange(node.range) <= textStorage.length {
-                textStorage.replaceCharacters(in: node.range, with: newAttributed)
+                // Replace the range
+                if NSMaxRange(node.range) <= textStorage.length {
+                    textStorage.replaceCharacters(in: node.range, with: newAttributed)
+                }
+
+                textStorage.endEditing()
             }
-
-            textStorage.endEditing()
         }
     }
 
     // MARK: - Notifications
 
     @objc private func textDidChangeNotification(_ notification: Notification) {
+        if isApplyingInternalUpdate { return }
         // Debounce rapid edits
         NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(processPendingEdits), object: nil)
         perform(#selector(processPendingEdits), with: nil, afterDelay: 0.016) // ~60fps
     }
 
     @objc private func processPendingEdits() {
+        if isApplyingInternalUpdate { return }
         // Get the current string and re-parse
         let currentString = string
+
+        // No-op if parser already has this exact source.
+        if parserState.document.source == currentString {
+            return
+        }
 
         // Update parser state
         parserState.setSource(currentString)
@@ -264,7 +294,15 @@ public final class TymarkTextView: NSTextView {
     }
 
     @objc private func selectionDidChangeNotification(_ notification: Notification) {
+        if isApplyingInternalUpdate { return }
         updateCursorProximity()
+    }
+
+    private func performInternalUpdate(_ work: () -> Void) {
+        let wasApplying = isApplyingInternalUpdate
+        isApplyingInternalUpdate = true
+        defer { isApplyingInternalUpdate = wasApplying }
+        work()
     }
 
     // MARK: - Overrides
@@ -431,22 +469,26 @@ public final class TymarkTextView: NSTextView {
 
     /// Applies the current zoom level by scaling fonts in the rendering context and re-rendering.
     func applyZoom() {
-        self.renderingContext = Self.makeRenderingContext(theme: theme, zoom: zoomMultiplier)
+        self.renderingContext = Self.makeRenderingContext(theme: theme, zoom: zoomMultiplier, isSourceMode: isSourceModeEnabledStorage)
         renderDocument()
     }
 
     private static func makeRenderingContext(theme: Theme) -> RenderingContext {
-        return makeRenderingContext(theme: theme, zoom: UserDefaults.standard.double(forKey: "editorZoomMultiplier").nonZeroOr(1.0))
+        return makeRenderingContext(
+            theme: theme,
+            zoom: UserDefaults.standard.double(forKey: "editorZoomMultiplier").nonZeroOr(1.0),
+            isSourceMode: false
+        )
     }
 
-    private static func makeRenderingContext(theme: Theme, zoom: CGFloat) -> RenderingContext {
+    private static func makeRenderingContext(theme: Theme, zoom: CGFloat, isSourceMode: Bool) -> RenderingContext {
         let bodyFont = theme.fonts.body.nsFont
         let codeFont = theme.fonts.code.nsFont
         let scaledBody = NSFont(descriptor: bodyFont.fontDescriptor, size: bodyFont.pointSize * zoom) ?? bodyFont
         let scaledCode = NSFont(descriptor: codeFont.fontDescriptor, size: codeFont.pointSize * zoom) ?? codeFont
 
         return RenderingContext(
-            isSourceMode: false,
+            isSourceMode: isSourceMode,
             baseFont: scaledBody,
             baseColor: theme.colors.text.nsColor,
             codeFont: scaledCode,
@@ -463,9 +505,9 @@ public final class TymarkTextView: NSTextView {
 @MainActor
 extension TymarkTextView: CursorProximityTrackerDelegate {
     public func cursorProximityTracker(_ tracker: CursorProximityTracker, didUpdateLocation location: Int) {
-        // Intentionally empty: updateCursorProximity() already drives the tracker,
-        // so calling it again here would cause infinite recursion.
-        toggleSyntaxVisibility(at: location)
+        // Inline syntax hide/reveal is a follow-up feature. Keeping this callback a no-op
+        // avoids attribute churn and prevents crashes while the editor stabilizes.
+        _ = location
     }
 }
 

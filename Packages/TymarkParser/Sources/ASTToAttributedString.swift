@@ -46,33 +46,86 @@ public struct RenderingContext: @unchecked Sendable {
 
     public static let `default` = RenderingContext(
         isSourceMode: false,
-        headingFontSizes: [
-            1: 32,
-            2: 24,
-            3: 20,
-            4: 17,
-            5: 15,
-            6: 14
-        ],
+        headingFontSizes: [1: 32, 2: 24, 3: 20, 4: 17, 5: 15, 6: 14],
         baseFont: TymarkFont.systemFont(ofSize: 14),
-        baseColor: TymarkColor.black,
+        baseColor: {
+            #if canImport(AppKit)
+            return NSColor.labelColor
+            #else
+            return UIColor.label
+            #endif
+        }(),
         codeFont: TymarkFont.monospacedSystemFont(ofSize: 13, weight: .regular),
-        linkColor: TymarkColor(red: 0, green: 0.48, blue: 1, alpha: 1),
-        syntaxHiddenColor: TymarkColor.black.withAlphaComponent(0.1),
-        codeBackgroundColor: TymarkColor.white.withAlphaComponent(0.5),
-        blockquoteColor: TymarkColor.gray
+        linkColor: {
+            #if canImport(AppKit)
+            return NSColor.linkColor
+            #else
+            return UIColor.link
+            #endif
+        }(),
+        syntaxHiddenColor: {
+            #if canImport(AppKit)
+            return NSColor.secondaryLabelColor.withAlphaComponent(0.35)
+            #else
+            return UIColor.secondaryLabel.withAlphaComponent(0.35)
+            #endif
+        }(),
+        codeBackgroundColor: {
+            #if canImport(AppKit)
+            return NSColor.textBackgroundColor.withAlphaComponent(0.4)
+            #else
+            return UIColor.secondarySystemBackground.withAlphaComponent(0.6)
+            #endif
+        }(),
+        blockquoteColor: {
+            #if canImport(AppKit)
+            return NSColor.secondaryLabelColor
+            #else
+            return UIColor.secondaryLabel
+            #endif
+        }()
     )
 
     public init(
         isSourceMode: Bool = false,
         headingFontSizes: [Int: CGFloat] = [1: 32, 2: 24, 3: 20, 4: 17, 5: 15, 6: 14],
         baseFont: TymarkFont = TymarkFont.systemFont(ofSize: 14),
-        baseColor: TymarkColor = TymarkColor.black,
+        baseColor: TymarkColor = {
+            #if canImport(AppKit)
+            return NSColor.labelColor
+            #else
+            return UIColor.label
+            #endif
+        }(),
         codeFont: TymarkFont = TymarkFont.monospacedSystemFont(ofSize: 13, weight: .regular),
-        linkColor: TymarkColor = TymarkColor(red: 0, green: 0.48, blue: 1, alpha: 1),
-        syntaxHiddenColor: TymarkColor = TymarkColor.black.withAlphaComponent(0.1),
-        codeBackgroundColor: TymarkColor = TymarkColor.white.withAlphaComponent(0.5),
-        blockquoteColor: TymarkColor = TymarkColor.gray
+        linkColor: TymarkColor = {
+            #if canImport(AppKit)
+            return NSColor.linkColor
+            #else
+            return UIColor.link
+            #endif
+        }(),
+        syntaxHiddenColor: TymarkColor = {
+            #if canImport(AppKit)
+            return NSColor.secondaryLabelColor.withAlphaComponent(0.35)
+            #else
+            return UIColor.secondaryLabel.withAlphaComponent(0.35)
+            #endif
+        }(),
+        codeBackgroundColor: TymarkColor = {
+            #if canImport(AppKit)
+            return NSColor.textBackgroundColor.withAlphaComponent(0.4)
+            #else
+            return UIColor.secondarySystemBackground.withAlphaComponent(0.6)
+            #endif
+        }(),
+        blockquoteColor: TymarkColor = {
+            #if canImport(AppKit)
+            return NSColor.secondaryLabelColor
+            #else
+            return UIColor.secondaryLabel
+            #endif
+        }()
     ) {
         self.isSourceMode = isSourceMode
         self.headingFontSizes = headingFontSizes
@@ -88,6 +141,8 @@ public struct RenderingContext: @unchecked Sendable {
 
 // MARK: - AST to Attributed String Converter
 
+/// Renders markdown by **preserving the original source string** and applying attributes over it.
+/// This avoids feedback loops and crashes caused by replacing the backing string while editing.
 public final class ASTToAttributedString {
     private let context: RenderingContext
 
@@ -96,574 +151,270 @@ public final class ASTToAttributedString {
     }
 
     public func convert(_ document: TymarkDocument) -> NSAttributedString {
-        return convertNode(document.root, source: document.source)
+        return render(source: document.source, root: document.root)
     }
 
     public func convertNode(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        switch node.type {
-        case .document:
-            for child in node.children {
-                result.append(convertNode(child, source: source))
-            }
-
-        case .paragraph:
-            for child in node.children {
-                result.append(convertNode(child, source: source))
-            }
-            result.append(NSAttributedString(string: "\n"))
-
-        case .heading(let level):
-            result.append(convertHeading(node, level: level, source: source))
-            result.append(NSAttributedString(string: "\n"))
-
-        case .blockquote:
-            result.append(convertBlockQuote(node, source: source))
-            result.append(NSAttributedString(string: "\n"))
-
-        case .list(let ordered):
-            result.append(convertList(node, ordered: ordered, source: source))
-            result.append(NSAttributedString(string: "\n"))
-
-        case .listItem:
-            result.append(convertListItem(node, source: source))
-
-        case .codeBlock:
-            result.append(convertCodeBlock(node, source: source))
-            result.append(NSAttributedString(string: "\n"))
-
-        case .inlineCode:
-            result.append(convertInlineCode(node, source: source))
-
-        case .emphasis:
-            result.append(convertEmphasis(node, source: source))
-
-        case .strong:
-            result.append(convertStrong(node, source: source))
-
-        case .link(let destination, _):
-            result.append(convertLink(node, destination: destination, source: source))
-
-        case .image:
-            result.append(convertImage(node, source: source))
-
-        case .text:
-            result.append(convertText(node, source: source))
-
-        case .softBreak:
-            result.append(NSAttributedString(string: " "))
-
-        case .lineBreak:
-            result.append(NSAttributedString(string: "\n"))
-
-        case .thematicBreak:
-            result.append(convertThematicBreak(node, source: source))
-            result.append(NSAttributedString(string: "\n"))
-
-        case .table:
-            result.append(convertTable(node, source: source))
-            result.append(NSAttributedString(string: "\n"))
-
-        case .tableRow:
-            result.append(convertTableRow(node, source: source))
-            result.append(NSAttributedString(string: "\n"))
-
-        case .tableCell:
-            result.append(convertTableCell(node, source: source))
-            result.append(NSAttributedString(string: " | "))
-
-        case .strikethrough:
-            result.append(convertStrikethrough(node, source: source))
-
-        case .html:
-            result.append(convertHTML(node, source: source))
-
-        // Phase 7: New node types
-        case .math(let display):
-            result.append(convertMath(node, display: display, source: source))
-
-        case .footnoteReference(let id):
-            result.append(convertFootnoteReference(id: id))
-
-        case .footnoteDefinition(let id):
-            result.append(convertFootnoteDefinition(node, id: id, source: source))
-
-        case .frontMatter:
-            result.append(convertFrontMatter(node, source: source))
-
-        case .mermaid:
-            result.append(convertMermaid(node, source: source))
-
-        case .custom:
-            // Just render children for custom nodes
-            for child in node.children {
-                result.append(convertNode(child, source: source))
-            }
+        let rendered = render(source: source, root: node)
+        let nsSource = source as NSString
+        guard let clamped = Self.clamp(node.range, maxLength: nsSource.length) else {
+            return NSAttributedString(string: "")
         }
-
-        // Apply base attributes to the entire range
-        let baseAttributes: [NSAttributedString.Key: Any] = [
-            .font: context.baseFont,
-            .foregroundColor: context.baseColor,
-            TymarkRenderingAttribute.nodeTypeKey: node.type,
-            TymarkRenderingAttribute.nodeIDKey: node.id.uuidString
-        ]
-        result.addAttributes(baseAttributes, range: NSRange(location: 0, length: result.length))
-
-        return result
+        return rendered.attributedSubstring(from: clamped)
     }
 
-    // MARK: - Element Converters
+    // MARK: - Rendering
 
-    private func convertHeading(_ node: TymarkNode, level: Int, source: String) -> NSAttributedString {
-        let content = extractContent(node, from: source)
-        let fontSize = context.headingFontSizes[level] ?? context.baseFont.pointSize
-        let font = TymarkFont.systemFont(ofSize: fontSize, weight: .bold)
+    private func render(source: String, root: TymarkNode) -> NSAttributedString {
+        let nsSource = source as NSString
+        let attributed = NSMutableAttributedString(string: source)
 
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: context.baseColor,
-            TymarkRenderingAttribute.nodeTypeKey: node.type,
-            TymarkRenderingAttribute.headingLevelKey: level
-        ]
+        let fullRange = NSRange(location: 0, length: nsSource.length)
+        attributed.addAttributes(
+            [
+                .font: context.baseFont,
+                .foregroundColor: context.baseColor
+            ],
+            range: fullRange
+        )
 
-        // Hide the markdown syntax (# characters) if not in source mode
-        let result = NSMutableAttributedString()
-        if !context.isSourceMode {
-            // Just show the content without #
-            let hashPrefix = String(repeating: "#", count: level) + " "
-            let contentWithoutPrefix = content.hasPrefix(hashPrefix) ? String(content.dropFirst(hashPrefix.count)) : content
-            let attributed = NSAttributedString(string: contentWithoutPrefix, attributes: attributes)
-            result.append(attributed)
-        } else {
-            let attributed = NSAttributedString(string: content, attributes: attributes)
-            result.append(attributed)
-        }
-
-        return result
+        applyNodeAttributes(root, to: attributed, nsSource: nsSource)
+        return attributed
     }
 
-    private func convertBlockQuote(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let content = extractContent(node, from: source)
+    private func applyNodeAttributes(_ node: TymarkNode, to attributed: NSMutableAttributedString, nsSource: NSString) {
+        let maxLength = nsSource.length
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.headIndent = 20
-        paragraphStyle.firstLineHeadIndent = 20
+        if let range = Self.clamp(node.range, maxLength: maxLength) {
+            safeAddAttributes(
+                [
+                    TymarkRenderingAttribute.nodeTypeKey: node.type,
+                    TymarkRenderingAttribute.nodeIDKey: node.id.uuidString
+                ],
+                to: attributed,
+                range: range,
+                maxLength: maxLength
+            )
 
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: context.baseFont,
-            .foregroundColor: context.blockquoteColor,
-            .paragraphStyle: paragraphStyle
-        ]
-
-        // Remove the > prefix if not in source mode
-        let result = NSMutableAttributedString()
-        if !context.isSourceMode {
-            let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
-            var processedLines: [String] = []
-            for line in lines {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("> ") {
-                    processedLines.append(String(trimmed.dropFirst(2)))
-                } else if trimmed.hasPrefix(">") {
-                    processedLines.append(String(trimmed.dropFirst(1)))
-                } else {
-                    processedLines.append(String(line))
-                }
-            }
-            let processedContent = processedLines.joined(separator: "\n")
-            let attributed = NSAttributedString(string: processedContent, attributes: attributes)
-            result.append(attributed)
-        } else {
-            let attributed = NSAttributedString(string: content, attributes: attributes)
-            result.append(attributed)
-        }
-
-        return result
-    }
-
-    private func convertList(_ node: TymarkNode, ordered: Bool, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for (index, child) in node.children.enumerated() {
-            if child.type == .listItem {
-                let marker = ordered ? "\(index + 1). " : "• "
-                let attributedMarker = NSAttributedString(
-                    string: marker,
-                    attributes: [.font: context.baseFont, .foregroundColor: context.baseColor]
+            switch node.type {
+            case .heading(let level):
+                applyHeading(level: level, nodeRange: range, to: attributed, nsSource: nsSource)
+            case .strong:
+                safeAddAttributes([.font: fontByAddingTraits(boldTrait, to: context.baseFont)], to: attributed, range: range, maxLength: maxLength)
+            case .emphasis:
+                safeAddAttributes([.font: fontByAddingTraits(italicTrait, to: context.baseFont)], to: attributed, range: range, maxLength: maxLength)
+            case .strikethrough:
+                safeAddAttributes([.strikethroughStyle: NSUnderlineStyle.single.rawValue], to: attributed, range: range, maxLength: maxLength)
+            case .inlineCode:
+                applyInlineCode(nodeRange: range, to: attributed, nsSource: nsSource)
+            case .codeBlock(let language):
+                applyCodeBlock(language: language, nodeRange: range, to: attributed, nsSource: nsSource)
+            case .link(let destination, _):
+                safeAddAttributes(
+                    [
+                        .foregroundColor: context.linkColor,
+                        .underlineStyle: NSUnderlineStyle.single.rawValue,
+                        TymarkRenderingAttribute.linkDestinationKey: destination
+                    ],
+                    to: attributed,
+                    range: range,
+                    maxLength: maxLength
                 )
-                result.append(attributedMarker)
-
-                // Convert list item children (skip the marker)
-                for grandchild in child.children {
-                    result.append(convertNode(grandchild, source: source))
-                }
+            case .blockquote:
+                applyBlockquote(nodeRange: range, to: attributed, nsSource: nsSource)
+            case .frontMatter, .math, .mermaid:
+                safeAddAttributes(
+                    [
+                        .font: context.codeFont,
+                        .backgroundColor: context.codeBackgroundColor
+                    ],
+                    to: attributed,
+                    range: range,
+                    maxLength: maxLength
+                )
+            default:
+                break
             }
         }
 
-        return result
-    }
-
-    private func convertListItem(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
         for child in node.children {
-            result.append(convertNode(child, source: source))
+            applyNodeAttributes(child, to: attributed, nsSource: nsSource)
         }
-        return result
     }
 
-    private func convertCodeBlock(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let content = node.content
-        let language = node.codeLanguage
+    // MARK: - Node Styling
 
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: context.codeFont,
-            .foregroundColor: context.baseColor,
-            .backgroundColor: context.codeBackgroundColor,
-            TymarkRenderingAttribute.codeLanguageKey: language ?? ""
-        ]
+    private func applyHeading(level: Int, nodeRange: NSRange, to attributed: NSMutableAttributedString, nsSource: NSString) {
+        let maxLength = nsSource.length
+        let raw = nsSource.substring(with: nodeRange)
+        let prefixLen = Self.headingPrefixLength(in: raw)
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.headIndent = 10
+        let fontSize = context.headingFontSizes[level] ?? context.baseFont.pointSize
+        let headingFont = TymarkFont.systemFont(ofSize: fontSize, weight: .bold)
 
-        let result = NSMutableAttributedString(
-            string: content,
-            attributes: attributes.merging([.paragraphStyle: paragraphStyle]) { $1 }
+        let contentRange = NSRange(location: nodeRange.location + prefixLen, length: max(0, nodeRange.length - prefixLen))
+        safeAddAttributes(
+            [
+                .font: headingFont,
+                TymarkRenderingAttribute.headingLevelKey: level
+            ],
+            to: attributed,
+            range: contentRange,
+            maxLength: maxLength
         )
 
-        return result
+        if !context.isSourceMode, prefixLen > 0 {
+            let syntaxRange = NSRange(location: nodeRange.location, length: min(prefixLen, nodeRange.length))
+            safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: syntaxRange, maxLength: maxLength)
+        }
     }
 
-    private func convertInlineCode(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let content = node.content
-
-        // Remove backticks if not in source mode
-        let displayContent: String
-        if !context.isSourceMode {
-            displayContent = content.trimmingCharacters(in: CharacterSet(charactersIn: "`"))
-        } else {
-            displayContent = content
-        }
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: context.codeFont,
-            .foregroundColor: context.baseColor,
-            .backgroundColor: context.codeBackgroundColor
-        ]
-
-        return NSAttributedString(string: displayContent, attributes: attributes)
-    }
-
-    private func convertEmphasis(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for child in node.children {
-            result.append(convertNode(child, source: source))
-        }
-
-        // Apply italic to the entire range
-        #if canImport(AppKit)
-        result.enumerateAttribute(.font, in: NSRange(location: 0, length: result.length)) { value, range, _ in
-            if let font = value as? TymarkFont {
-                let italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
-                result.addAttribute(.font, value: italicFont, range: range)
-            }
-        }
-        #else
-        // On non-macOS platforms, use UIFontDescriptor for proper trait manipulation
-        result.enumerateAttribute(.font, in: NSRange(location: 0, length: result.length)) { value, range, _ in
-            if let font = value as? TymarkFont {
-                let descriptor = font.fontDescriptor.withSymbolicTraits(.traitItalic) ?? font.fontDescriptor
-                let italicFont = TymarkFont(descriptor: descriptor, size: font.pointSize)
-                result.addAttribute(.font, value: italicFont, range: range)
-            }
-        }
-        #endif
-
-        return result
-    }
-
-    private func convertStrong(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for child in node.children {
-            result.append(convertNode(child, source: source))
-        }
-
-        // Apply bold to the entire range
-        #if canImport(AppKit)
-        result.enumerateAttribute(.font, in: NSRange(location: 0, length: result.length)) { value, range, _ in
-            if let font = value as? TymarkFont {
-                let boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-                result.addAttribute(.font, value: boldFont, range: range)
-            }
-        }
-        #else
-        result.enumerateAttribute(.font, in: NSRange(location: 0, length: result.length)) { value, range, _ in
-            if let font = value as? TymarkFont {
-                let descriptor = font.fontDescriptor.withSymbolicTraits(.traitBold) ?? font.fontDescriptor
-                let boldFont = TymarkFont(descriptor: descriptor, size: font.pointSize)
-                result.addAttribute(.font, value: boldFont, range: range)
-            }
-        }
-        #endif
-
-        return result
-    }
-
-    private func convertLink(_ node: TymarkNode, destination: String, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for child in node.children {
-            result.append(convertNode(child, source: source))
-        }
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: context.linkColor,
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
-            TymarkRenderingAttribute.linkDestinationKey: destination
-        ]
-
-        result.addAttributes(attributes, range: NSRange(location: 0, length: result.length))
-
-        return result
-    }
-
-    private func convertImage(_ node: TymarkNode, source: String) -> NSAttributedString {
-        // Image data is stored in the type's associated values, not metadata
-        let alt: String
-        let src: String
-        if case .image(let imageSource, let imageAlt) = node.type {
-            src = imageSource
-            alt = imageAlt ?? "image"
-        } else {
-            src = ""
-            alt = "image"
-        }
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: context.linkColor,
-            .backgroundColor: context.codeBackgroundColor,
-            TymarkRenderingAttribute.imageSourceKey: src
-        ]
-
-        // Show alt text with image indicator
-        return NSAttributedString(
-            string: "[Image: \(alt)]",
-            attributes: attributes
-        )
-    }
-
-    private func convertText(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let content = node.content
-        return NSAttributedString(string: content, attributes: [
-            .font: context.baseFont,
-            .foregroundColor: context.baseColor
-        ])
-    }
-
-    private func convertThematicBreak(_ node: TymarkNode, source: String) -> NSAttributedString {
-        return NSAttributedString(
-            string: String(repeating: "—", count: 30),
-            attributes: [
-                .foregroundColor: TymarkColor.gray
-            ]
-        )
-    }
-
-    private func convertTable(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for child in node.children {
-            result.append(convertNode(child, source: source))
-        }
-
-        return result
-    }
-
-    private func convertTableRow(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for child in node.children {
-            result.append(convertNode(child, source: source))
-        }
-
-        return result
-    }
-
-    private func convertTableCell(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for child in node.children {
-            result.append(convertNode(child, source: source))
-        }
-
-        // Add some padding attributes
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: context.baseFont,
-            .foregroundColor: context.baseColor
-        ]
-
-        result.addAttributes(attributes, range: NSRange(location: 0, length: result.length))
-
-        return result
-    }
-
-    private func convertStrikethrough(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        for child in node.children {
-            result.append(convertNode(child, source: source))
-        }
-
-        result.addAttribute(
-            .strikethroughStyle,
-            value: NSUnderlineStyle.single.rawValue,
-            range: NSRange(location: 0, length: result.length)
-        )
-
-        return result
-    }
-
-    private func convertHTML(_ node: TymarkNode, source: String) -> NSAttributedString {
-        // For now, just render the HTML content as-is
-        let content = node.content
-        return NSAttributedString(
-            string: content,
-            attributes: [
+    private func applyInlineCode(nodeRange: NSRange, to attributed: NSMutableAttributedString, nsSource: NSString) {
+        let maxLength = nsSource.length
+        safeAddAttributes(
+            [
                 .font: context.codeFont,
-                .foregroundColor: context.blockquoteColor
-            ]
+                .backgroundColor: context.codeBackgroundColor
+            ],
+            to: attributed,
+            range: nodeRange,
+            maxLength: maxLength
         )
+
+        if !context.isSourceMode {
+            let raw = nsSource.substring(with: nodeRange)
+            if raw.hasPrefix("`") && raw.hasSuffix("`") && raw.count >= 2 {
+                safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: NSRange(location: nodeRange.location, length: 1), maxLength: maxLength)
+                safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: NSRange(location: NSMaxRange(nodeRange) - 1, length: 1), maxLength: maxLength)
+            }
+        }
     }
 
-    // MARK: - Phase 7 Converters
+    private func applyCodeBlock(language: String?, nodeRange: NSRange, to attributed: NSMutableAttributedString, nsSource: NSString) {
+        let maxLength = nsSource.length
+        safeAddAttributes(
+            [
+                .font: context.codeFont,
+                .backgroundColor: context.codeBackgroundColor,
+                TymarkRenderingAttribute.codeLanguageKey: language ?? ""
+            ],
+            to: attributed,
+            range: nodeRange,
+            maxLength: maxLength
+        )
 
-    private func convertMath(_ node: TymarkNode, display: Bool, source: String) -> NSAttributedString {
-        let content = node.content
+        // Hide ``` fences in non-source mode (best-effort).
+        guard !context.isSourceMode else { return }
+        let raw = nsSource.substring(with: nodeRange)
+        let regex = try? NSRegularExpression(pattern: "(?m)^```.*$", options: [])
+        let rawRange = NSRange(location: 0, length: (raw as NSString).length)
+        let matches = regex?.matches(in: raw, range: rawRange) ?? []
+        for match in matches {
+            let fence = match.range
+            let global = NSRange(location: nodeRange.location + fence.location, length: fence.length)
+            safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: global, maxLength: maxLength)
+        }
+    }
 
-        let font = display
-            ? TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 1.2)
-            : context.baseFont
-
+    private func applyBlockquote(nodeRange: NSRange, to attributed: NSMutableAttributedString, nsSource: NSString) {
+        let maxLength = nsSource.length
         let paragraphStyle = NSMutableParagraphStyle()
-        if display {
-            paragraphStyle.alignment = .center
-            paragraphStyle.paragraphSpacingBefore = 8
-            paragraphStyle.paragraphSpacing = 8
+        paragraphStyle.headIndent = 18
+        paragraphStyle.firstLineHeadIndent = 18
+        paragraphStyle.paragraphSpacing = 4
+
+        safeAddAttributes(
+            [
+                .foregroundColor: context.blockquoteColor,
+                .paragraphStyle: paragraphStyle
+            ],
+            to: attributed,
+            range: nodeRange,
+            maxLength: maxLength
+        )
+
+        guard !context.isSourceMode else { return }
+
+        let raw = nsSource.substring(with: nodeRange)
+        let rawNS = raw as NSString
+        let regex = try? NSRegularExpression(pattern: "(?m)^\\s*>\\s?", options: [])
+        let matches = regex?.matches(in: raw, range: NSRange(location: 0, length: rawNS.length)) ?? []
+        for match in matches {
+            let local = match.range
+            let global = NSRange(location: nodeRange.location + local.location, length: local.length)
+            safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: global, maxLength: maxLength)
         }
-
-        var attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: context.baseColor
-        ]
-
-        if display {
-            attributes[.paragraphStyle] = paragraphStyle
-        }
-
-        // Render as styled math placeholder with LaTeX content
-        let displayText = display ? content : content
-        let result = NSMutableAttributedString(string: displayText, attributes: attributes)
-
-        if display {
-            result.append(NSAttributedString(string: "\n"))
-        }
-
-        return result
     }
 
-    private func convertFootnoteReference(id: String) -> NSAttributedString {
-        // Render as superscript number
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.75),
-            .foregroundColor: context.linkColor,
-            .superscript: 1
-        ]
+    // MARK: - Utilities
 
-        return NSAttributedString(string: "[\(id)]", attributes: attributes)
+    private func safeAddAttributes(
+        _ attributes: [NSAttributedString.Key: Any],
+        to attributed: NSMutableAttributedString,
+        range: NSRange,
+        maxLength: Int
+    ) {
+        guard let clamped = Self.clamp(range, maxLength: maxLength) else { return }
+        attributed.addAttributes(attributes, range: clamped)
     }
 
-    private func convertFootnoteDefinition(_ node: TymarkNode, id: String, source: String) -> NSAttributedString {
-        let content = node.content
-
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.headIndent = 20
-        paragraphStyle.firstLineHeadIndent = 0
-        paragraphStyle.paragraphSpacingBefore = 4
-
-        let labelAttrs: [NSAttributedString.Key: Any] = [
-            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.85, weight: .bold),
-            .foregroundColor: context.linkColor,
-            .superscript: 1
-        ]
-
-        let contentAttrs: [NSAttributedString.Key: Any] = [
-            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.9),
-            .foregroundColor: context.baseColor,
-            .paragraphStyle: paragraphStyle
-        ]
-
-        let result = NSMutableAttributedString()
-        result.append(NSAttributedString(string: "[\(id)] ", attributes: labelAttrs))
-        result.append(NSAttributedString(string: content, attributes: contentAttrs))
-        result.append(NSAttributedString(string: "\n"))
-
-        return result
+    private static func clamp(_ range: NSRange, maxLength: Int) -> NSRange? {
+        guard maxLength > 0 else { return nil }
+        let start = max(0, min(range.location, maxLength))
+        let end = max(start, min(NSMaxRange(range), maxLength))
+        let length = end - start
+        guard length > 0 else { return nil }
+        return NSRange(location: start, length: length)
     }
 
-    private func convertFrontMatter(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let content = node.content
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: context.codeFont,
-            .foregroundColor: context.blockquoteColor,
-            .backgroundColor: context.codeBackgroundColor
-        ]
-
-        let result = NSMutableAttributedString()
-        result.append(NSAttributedString(string: "---\n", attributes: attributes))
-        result.append(NSAttributedString(string: content, attributes: attributes))
-        result.append(NSAttributedString(string: "---\n", attributes: attributes))
-
-        return result
-    }
-
-    private func convertMermaid(_ node: TymarkNode, source: String) -> NSAttributedString {
-        let content = node.content
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: context.codeFont,
-            .foregroundColor: context.baseColor,
-            .backgroundColor: context.codeBackgroundColor
-        ]
-
-        let result = NSMutableAttributedString()
-        // Show as a labeled code block placeholder
-        let labelAttrs: [NSAttributedString.Key: Any] = [
-            .font: TymarkFont.systemFont(ofSize: context.baseFont.pointSize * 0.85, weight: .medium),
-            .foregroundColor: context.linkColor
-        ]
-        result.append(NSAttributedString(string: "[Mermaid Diagram]\n", attributes: labelAttrs))
-        result.append(NSAttributedString(string: content, attributes: attributes))
-        result.append(NSAttributedString(string: "\n"))
-
-        return result
-    }
-
-    // MARK: - Helpers
-
-    private func extractContent(_ node: TymarkNode, from source: String) -> String {
-        guard node.range.location >= 0 && node.range.length > 0 else {
-            return node.content
+    private static func headingPrefixLength(in text: String) -> Int {
+        // Count leading #...# and one following space if present.
+        var idx = text.startIndex
+        var countHashes = 0
+        while idx < text.endIndex, text[idx] == "#" {
+            countHashes += 1
+            idx = text.index(after: idx)
         }
-        guard let stringRange = Range(node.range, in: source) else {
-            return node.content
+        // Consume one space after hashes.
+        if idx < text.endIndex, text[idx] == " " {
+            return countHashes + 1
         }
-        return String(source[stringRange])
+        return countHashes
+    }
+
+    private var boldTrait: TymarkFontDescriptorSymbolicTrait {
+        #if canImport(AppKit)
+        return .bold
+        #else
+        return .traitBold
+        #endif
+    }
+
+    private var italicTrait: TymarkFontDescriptorSymbolicTrait {
+        #if canImport(AppKit)
+        return .italic
+        #else
+        return .traitItalic
+        #endif
+    }
+
+    private func fontByAddingTraits(_ traits: TymarkFontDescriptorSymbolicTrait, to font: TymarkFont) -> TymarkFont {
+        #if canImport(AppKit)
+        var symbolic = font.fontDescriptor.symbolicTraits
+        symbolic.formUnion(traits)
+        let descriptor = font.fontDescriptor.withSymbolicTraits(symbolic) ?? font.fontDescriptor
+        return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+        #else
+        var symbolic = font.fontDescriptor.symbolicTraits
+        symbolic.formUnion(traits)
+        let descriptor = font.fontDescriptor.withSymbolicTraits(symbolic) ?? font.fontDescriptor
+        return UIFont(descriptor: descriptor, size: font.pointSize)
+        #endif
     }
 }
 
-// NOTE: Removed infinite-recursion NSMutableAttributedString.append extension.
-// NSMutableAttributedString already has append(_:) — re-declaring it caused a stack overflow.
+#if canImport(AppKit)
+private typealias TymarkFontDescriptorSymbolicTrait = NSFontDescriptor.SymbolicTraits
+#else
+private typealias TymarkFontDescriptorSymbolicTrait = UIFontDescriptor.SymbolicTraits
+#endif

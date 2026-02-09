@@ -46,7 +46,12 @@ public final class MarkdownParser: @unchecked Sendable {
         let frontMatterOffset = frontMatter != nil ? NSMaxRange(frontMatter!.range) : 0
 
         let markdownDocument = Document(parsing: strippedSource)
-        var root = convertNode(markdownDocument, in: source, baseLocation: frontMatterOffset)
+        var root = convertNode(
+            markdownDocument,
+            rangeSource: strippedSource,
+            fullSource: source,
+            baseLocation: frontMatterOffset
+        )
 
         // Phase 7: Post-process for additional elements
         root = postProcess(root, source: source, frontMatter: frontMatter)
@@ -270,7 +275,7 @@ public final class MarkdownParser: @unchecked Sendable {
             break
         }
         if let child = firstChild {
-            let localNode = convertNode(child, in: source, baseLocation: 0)
+            let localNode = convertNode(child, rangeSource: source, fullSource: source, baseLocation: 0)
             return offsetNode(localNode, by: location)
         }
         return TymarkNode(type: .paragraph, range: NSRange(location: location, length: source.count))
@@ -352,121 +357,121 @@ public final class MarkdownParser: @unchecked Sendable {
 
     // MARK: - Node Conversion
 
-    private func convertNode(_ node: Markup, in source: String, baseLocation: Int) -> TymarkNode {
-        let range = node.range(in: source, baseLocation: baseLocation)
+    private func convertNode(_ node: Markup, rangeSource: String, fullSource: String, baseLocation: Int) -> TymarkNode {
+        let range = node.range(in: rangeSource, baseLocation: baseLocation)
 
         switch node {
         case let document as Document:
-            return convertDocument(document, in: source, range: range)
+            return convertDocument(document, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let paragraph as Paragraph:
-            return convertParagraph(paragraph, in: source, range: range)
+            return convertParagraph(paragraph, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let heading as Heading:
-            return convertHeading(heading, in: source, range: range)
+            return convertHeading(heading, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let blockQuote as BlockQuote:
-            return convertBlockQuote(blockQuote, in: source, range: range)
+            return convertBlockQuote(blockQuote, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let list as UnorderedList:
-            return convertList(list, ordered: false, in: source, range: range)
+            return convertList(list, ordered: false, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let list as OrderedList:
-            return convertList(list, ordered: true, in: source, range: range)
+            return convertList(list, ordered: true, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let item as ListItem:
-            return convertListItem(item, in: source, range: range)
+            return convertListItem(item, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let codeBlock as CodeBlock:
-            return convertCodeBlock(codeBlock, in: source, range: range)
+            return convertCodeBlock(codeBlock, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let inlineCode as InlineCode:
-            return convertInlineCode(inlineCode, in: source, range: range)
+            return convertInlineCode(inlineCode, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let emphasis as Emphasis:
-            return convertEmphasis(emphasis, in: source, range: range)
+            return convertEmphasis(emphasis, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let strong as Strong:
-            return convertStrong(strong, in: source, range: range)
+            return convertStrong(strong, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let link as Link:
-            return convertLink(link, in: source, range: range)
+            return convertLink(link, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let image as Image:
-            return convertImage(image, in: source, range: range)
+            return convertImage(image, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let text as Markdown.Text:
-            return convertText(text, in: source, range: range)
+            return convertText(text, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let softBreak as SoftBreak:
-            return convertSoftBreak(softBreak, in: source, range: range)
+            return convertSoftBreak(softBreak, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let lineBreak as LineBreak:
-            return convertLineBreak(lineBreak, in: source, range: range)
+            return convertLineBreak(lineBreak, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let thematicBreak as ThematicBreak:
-            return convertThematicBreak(thematicBreak, in: source, range: range)
+            return convertThematicBreak(thematicBreak, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let table as Markdown.Table:
-            return convertTable(table, in: source, range: range)
+            return convertTable(table, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let tableRow as Markdown.Table.Row:
-            return convertTableRow(tableRow, in: source, range: range)
+            return convertTableRow(tableRow, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let tableCell as Markdown.Table.Cell:
-            return convertTableCell(tableCell, in: source, range: range)
+            return convertTableCell(tableCell, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let strikethrough as Strikethrough:
-            return convertStrikethrough(strikethrough, in: source, range: range)
+            return convertStrikethrough(strikethrough, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let html as InlineHTML:
-            return convertInlineHTML(html, in: source, range: range)
+            return convertInlineHTML(html, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         case let html as HTMLBlock:
-            return convertHTMLBlock(html, in: source, range: range)
+            return convertHTMLBlock(html, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation, range: range)
         default:
             return TymarkNode(
                 type: .custom(name: String(describing: type(of: node))),
                 content: "",
                 range: range,
-                children: node.children.map { convertNode($0, in: source, baseLocation: baseLocation) }
+                children: node.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
             )
         }
     }
 
-    private func convertDocument(_ document: Document, in source: String, range: NSRange) -> TymarkNode {
+    private func convertDocument(_ document: Document, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .document,
             content: "",
             range: range,
-            children: document.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: document.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertParagraph(_ paragraph: Paragraph, in source: String, range: NSRange) -> TymarkNode {
+    private func convertParagraph(_ paragraph: Paragraph, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .paragraph,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: paragraph.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: paragraph.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertHeading(_ heading: Heading, in source: String, range: NSRange) -> TymarkNode {
+    private func convertHeading(_ heading: Heading, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .heading(level: heading.level),
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: heading.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: heading.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertBlockQuote(_ blockQuote: BlockQuote, in source: String, range: NSRange) -> TymarkNode {
+    private func convertBlockQuote(_ blockQuote: BlockQuote, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .blockquote,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: blockQuote.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: blockQuote.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertList(_ list: ListItemContainer, ordered: Bool, in source: String, range: NSRange) -> TymarkNode {
+    private func convertList(_ list: ListItemContainer, ordered: Bool, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .list(ordered: ordered),
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: list.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: list.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertListItem(_ item: ListItem, in source: String, range: NSRange) -> TymarkNode {
+    private func convertListItem(_ item: ListItem, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .listItem,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: item.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: item.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertCodeBlock(_ codeBlock: CodeBlock, in source: String, range: NSRange) -> TymarkNode {
+    private func convertCodeBlock(_ codeBlock: CodeBlock, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .codeBlock(language: codeBlock.language),
             content: codeBlock.code,
@@ -475,7 +480,7 @@ public final class MarkdownParser: @unchecked Sendable {
         )
     }
 
-    private func convertInlineCode(_ inlineCode: InlineCode, in source: String, range: NSRange) -> TymarkNode {
+    private func convertInlineCode(_ inlineCode: InlineCode, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .inlineCode,
             content: inlineCode.code,
@@ -484,34 +489,34 @@ public final class MarkdownParser: @unchecked Sendable {
         )
     }
 
-    private func convertEmphasis(_ emphasis: Emphasis, in source: String, range: NSRange) -> TymarkNode {
+    private func convertEmphasis(_ emphasis: Emphasis, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .emphasis,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: emphasis.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: emphasis.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertStrong(_ strong: Strong, in source: String, range: NSRange) -> TymarkNode {
+    private func convertStrong(_ strong: Strong, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .strong,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: strong.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: strong.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertLink(_ link: Link, in source: String, range: NSRange) -> TymarkNode {
+    private func convertLink(_ link: Link, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .link(destination: link.destination ?? "", title: link.title),
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: link.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: link.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertImage(_ image: Image, in source: String, range: NSRange) -> TymarkNode {
+    private func convertImage(_ image: Image, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .image(source: image.source ?? "", alt: image.plainText),
             content: "",
@@ -520,7 +525,7 @@ public final class MarkdownParser: @unchecked Sendable {
         )
     }
 
-    private func convertText(_ text: Markdown.Text, in source: String, range: NSRange) -> TymarkNode {
+    private func convertText(_ text: Markdown.Text, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .text,
             content: text.string,
@@ -529,7 +534,7 @@ public final class MarkdownParser: @unchecked Sendable {
         )
     }
 
-    private func convertSoftBreak(_ softBreak: SoftBreak, in source: String, range: NSRange) -> TymarkNode {
+    private func convertSoftBreak(_ softBreak: SoftBreak, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .softBreak,
             content: " ",
@@ -538,7 +543,7 @@ public final class MarkdownParser: @unchecked Sendable {
         )
     }
 
-    private func convertLineBreak(_ lineBreak: LineBreak, in source: String, range: NSRange) -> TymarkNode {
+    private func convertLineBreak(_ lineBreak: LineBreak, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .lineBreak,
             content: "\n",
@@ -547,52 +552,52 @@ public final class MarkdownParser: @unchecked Sendable {
         )
     }
 
-    private func convertThematicBreak(_ thematicBreak: ThematicBreak, in source: String, range: NSRange) -> TymarkNode {
+    private func convertThematicBreak(_ thematicBreak: ThematicBreak, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .thematicBreak,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
             children: []
         )
     }
 
-    private func convertTable(_ table: Markdown.Table, in source: String, range: NSRange) -> TymarkNode {
+    private func convertTable(_ table: Markdown.Table, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .table,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: table.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: table.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertTableRow(_ row: Markdown.Table.Row, in source: String, range: NSRange) -> TymarkNode {
+    private func convertTableRow(_ row: Markdown.Table.Row, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .tableRow,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: row.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: row.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertTableCell(_ cell: Markdown.Table.Cell, in source: String, range: NSRange) -> TymarkNode {
+    private func convertTableCell(_ cell: Markdown.Table.Cell, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .tableCell,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: cell.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: cell.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertStrikethrough(_ strikethrough: Strikethrough, in source: String, range: NSRange) -> TymarkNode {
+    private func convertStrikethrough(_ strikethrough: Strikethrough, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .strikethrough,
-            content: extractContent(for: range, from: source),
+            content: extractContent(for: range, from: fullSource),
             range: range,
-            children: strikethrough.children.map { convertNode($0, in: source, baseLocation: range.location) }
+            children: strikethrough.children.map { convertNode($0, rangeSource: rangeSource, fullSource: fullSource, baseLocation: baseLocation) }
         )
     }
 
-    private func convertInlineHTML(_ html: InlineHTML, in source: String, range: NSRange) -> TymarkNode {
+    private func convertInlineHTML(_ html: InlineHTML, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .html,
             content: html.rawHTML,
@@ -601,7 +606,7 @@ public final class MarkdownParser: @unchecked Sendable {
         )
     }
 
-    private func convertHTMLBlock(_ html: HTMLBlock, in source: String, range: NSRange) -> TymarkNode {
+    private func convertHTMLBlock(_ html: HTMLBlock, rangeSource: String, fullSource: String, baseLocation: Int, range: NSRange) -> TymarkNode {
         return TymarkNode(
             type: .html,
             content: html.rawHTML,
@@ -650,8 +655,12 @@ extension Markup {
                 endOffset += min(endCol, (lines[endLine] as NSString).length)
             }
 
-            let location = startOffset
-            let length = max(0, endOffset - startOffset)
+            let nsSource = source as NSString
+            let clampedStart = max(0, min(startOffset, nsSource.length))
+            let clampedEnd = max(clampedStart, min(endOffset, nsSource.length))
+
+            let location = baseLocation + clampedStart
+            let length = max(0, clampedEnd - clampedStart)
             return NSRange(location: location, length: length)
         }
 

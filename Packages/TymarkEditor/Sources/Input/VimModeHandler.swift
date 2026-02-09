@@ -665,7 +665,8 @@ public final class VimModeHandler: ObservableObject {
     }
 
     private func isWordBoundary(_ char: unichar) -> Bool {
-        let c = Character(UnicodeScalar(char)!)
+        guard let scalar = UnicodeScalar(char) else { return false }
+        let c = Character(scalar)
         return c.isWhitespace || c.isNewline || c.isPunctuation
     }
 

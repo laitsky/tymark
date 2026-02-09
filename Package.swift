@@ -11,6 +11,10 @@ let package = Package(
             name: "Tymark",
             targets: ["Tymark"]
         ),
+        .executable(
+            name: "TymarkSmokeCheck",
+            targets: ["TymarkSmokeCheck"]
+        ),
         .library(
             name: "TymarkParser",
             targets: ["TymarkParser"]
@@ -62,6 +66,19 @@ let package = Package(
                 "TymarkAI"
             ],
             path: "App/Tymark",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
+        ),
+
+        // MARK: - Smoke Check
+        .executableTarget(
+            name: "TymarkSmokeCheck",
+            dependencies: [
+                "TymarkParser",
+                "TymarkTheme"
+            ],
+            path: "App/TymarkSmokeCheck",
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")
             ]

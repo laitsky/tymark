@@ -1023,7 +1023,7 @@ struct ContentView: View {
         case "pdf":
             panel.allowedContentTypes = [UTType.pdf]
         case "docx":
-            panel.allowedContentTypes = [UTType(filenameExtension: "docx")!]
+            panel.allowedContentTypes = [UTType(filenameExtension: "docx") ?? .data]
         case "rtf":
             panel.allowedContentTypes = [UTType.rtf]
         default:
@@ -1200,8 +1200,13 @@ struct SidebarView: View {
 
             Section(header: Text("Recent")) {
                 ForEach(workspaceManager.currentWorkspace?.recentFiles ?? [], id: \.self) { url in
-                    Text(url.lastPathComponent)
-                        .lineLimit(1)
+                    Button {
+                        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in }
+                    } label: {
+                        Text(url.lastPathComponent)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1241,9 +1246,13 @@ struct FileRow: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if file.isDirectory {
-                // Toggle expansion
+                if let workspaceID = workspaceManager.currentWorkspace?.id {
+                    workspaceManager.expandDirectory(file.id, in: workspaceID)
+                }
             } else {
                 workspaceManager.selectFile(file)
+                workspaceManager.openFile(file)
+                NSDocumentController.shared.openDocument(withContentsOf: file.url, display: true) { _, _, _ in }
             }
         }
     }

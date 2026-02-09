@@ -92,22 +92,9 @@ public final class InlineRenderingController {
     }
 
     private func renderIncremental(at range: NSRange) {
-        // Update only the affected range
-        guard let node = parserState.block(at: range.location) else {
-            // Fall back to full render if we can't find the block
-            renderFullDocument()
-            return
-        }
-
-        let converter = ASTToAttributedString(context: renderingContext)
-        let attributedNode = converter.convertNode(node, source: parserState.document.source)
-
-        // Replace in text storage
-        textStorage.beginEditing()
-        if NSMaxRange(node.range) <= textStorage.length {
-            textStorage.replaceCharacters(in: node.range, with: attributedNode)
-        }
-        textStorage.endEditing()
+        // Current renderer preserves the original source string, so incremental replacement
+        // would require carefully merging attributes. Keep it simple and safe: full re-render.
+        renderFullDocument()
     }
 
     // MARK: - Syntax Visibility

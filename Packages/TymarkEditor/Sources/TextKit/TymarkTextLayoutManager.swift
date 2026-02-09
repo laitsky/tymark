@@ -45,17 +45,21 @@ public final class TymarkTextLayoutManager: NSLayoutManager {
         guard let textStorage = self.textStorage,
               currentDocument != nil else { return }
 
+        // `drawGlyphs(forGlyphRange:)` provides a glyph range; attribute enumeration expects
+        // a character range. Converting prevents out-of-bounds crashes.
+        let characterRange = self.characterRange(forGlyphRange: range, actualGlyphRange: nil)
+
         // Enumerate through the range and draw custom decorations
-        textStorage.enumerateAttributes(in: range) { attributes, attrRange, _ in
+        textStorage.enumerateAttributes(in: characterRange) { attributes, attrRange, _ in
             // Check for special node types
             if let nodeType = attributes[TymarkRenderingAttribute.nodeTypeKey] as? TymarkNodeType {
                 switch nodeType {
                 case .codeBlock:
-                    self.drawCodeBlockBackground(for: attrRange, at: origin, in: textStorage)
+                    self.drawCodeBlockBackground(forCharacterRange: attrRange, at: origin, in: textStorage)
                 case .blockquote:
-                    self.drawBlockQuoteIndicator(for: attrRange, at: origin, in: textStorage)
+                    self.drawBlockQuoteIndicator(forCharacterRange: attrRange, at: origin, in: textStorage)
                 case .thematicBreak:
-                    self.drawHorizontalRule(for: attrRange, at: origin, in: textStorage)
+                    self.drawHorizontalRule(forCharacterRange: attrRange, at: origin, in: textStorage)
                 default:
                     break
                 }
@@ -63,10 +67,11 @@ public final class TymarkTextLayoutManager: NSLayoutManager {
         }
     }
 
-    private func drawCodeBlockBackground(for range: NSRange, at origin: NSPoint, in textStorage: NSTextStorage) {
+    private func drawCodeBlockBackground(forCharacterRange range: NSRange, at origin: NSPoint, in textStorage: NSTextStorage) {
         guard let textContainer = self.textContainers.first else { return }
 
-        let rect = self.boundingRect(forGlyphRange: range, in: textContainer)
+        let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = self.boundingRect(forGlyphRange: glyphRange, in: textContainer)
         let adjustedRect = rect.offsetBy(dx: origin.x, dy: origin.y)
 
         // Draw code block background
@@ -75,10 +80,11 @@ public final class TymarkTextLayoutManager: NSLayoutManager {
         path.fill()
     }
 
-    private func drawBlockQuoteIndicator(for range: NSRange, at origin: NSPoint, in textStorage: NSTextStorage) {
+    private func drawBlockQuoteIndicator(forCharacterRange range: NSRange, at origin: NSPoint, in textStorage: NSTextStorage) {
         guard let textContainer = self.textContainers.first else { return }
 
-        let rect = self.boundingRect(forGlyphRange: range, in: textContainer)
+        let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = self.boundingRect(forGlyphRange: glyphRange, in: textContainer)
         let adjustedRect = rect.offsetBy(dx: origin.x, dy: origin.y)
 
         // Draw blockquote left border
@@ -94,10 +100,11 @@ public final class TymarkTextLayoutManager: NSLayoutManager {
         path.fill()
     }
 
-    private func drawHorizontalRule(for range: NSRange, at origin: NSPoint, in textStorage: NSTextStorage) {
+    private func drawHorizontalRule(forCharacterRange range: NSRange, at origin: NSPoint, in textStorage: NSTextStorage) {
         guard let textContainer = self.textContainers.first else { return }
 
-        let rect = self.boundingRect(forGlyphRange: range, in: textContainer)
+        let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = self.boundingRect(forGlyphRange: glyphRange, in: textContainer)
         let adjustedRect = rect.offsetBy(dx: origin.x, dy: origin.y)
 
         // Draw horizontal line
