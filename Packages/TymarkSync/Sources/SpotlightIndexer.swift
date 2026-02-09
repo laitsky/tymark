@@ -98,33 +98,10 @@ public final class SpotlightIndexer {
 
     /// Re-index all documents in a directory.
     public func reindexDirectory(at directoryURL: URL) {
-        Task.detached { [weak self] in
+        Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-
-            let fileManager = FileManager.default
-            guard let enumerator = fileManager.enumerator(
-                at: directoryURL,
-                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else { return }
-
-            var documents: [(url: URL, content: String, title: String?)] = []
-
-            for case let fileURL as URL in enumerator {
-                guard Self.markdownExtensions.contains(fileURL.pathExtension.lowercased()) else {
-                    continue
-                }
-
-                guard let data = try? Data(contentsOf: fileURL),
-                      let content = String(data: data, encoding: .utf8) else {
-                    continue
-                }
-
-                let title = Self.extractTitle(from: content)
-                documents.append((url: fileURL, content: content, title: title))
-            }
-
-            await MainActor.run { [weak self] in
+            let documents = Self.collectDocuments(in: directoryURL)
+            await MainActor.run { [weak self, documents] in
                 self?.indexDocuments(documents)
             }
         }
@@ -168,6 +145,30 @@ public final class SpotlightIndexer {
     // MARK: - Content Extraction (static for reuse)
 
     nonisolated private static let markdownExtensions: Set<String> = ["md", "markdown", "mdown", "mkd"]
+
+    nonisolated private static func collectDocuments(in directoryURL: URL) -> [(url: URL, content: String, title: String?)] {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        var documents: [(url: URL, content: String, title: String?)] = []
+        for case let fileURL as URL in enumerator {
+            guard markdownExtensions.contains(fileURL.pathExtension.lowercased()) else {
+                continue
+            }
+            guard let data = try? Data(contentsOf: fileURL),
+                  let content = String(data: data, encoding: .utf8) else {
+                continue
+            }
+            documents.append((url: fileURL, content: content, title: extractTitle(from: content)))
+        }
+        return documents
+    }
 
     nonisolated static func extractTitle(from content: String) -> String? {
         let lines = content.components(separatedBy: .newlines)

@@ -11,17 +11,23 @@ public struct TymarkEditorView: NSViewRepresentable {
     @Binding public var text: String
     @Binding public var selection: NSRange
     @ObservedObject public var viewModel: EditorViewModel
+    public var keybindingHandler: KeybindingHandler?
+    public var vimModeHandler: VimModeHandler?
 
     // MARK: - Initialization
 
     public init(
         text: Binding<String>,
         selection: Binding<NSRange> = .constant(NSRange(location: 0, length: 0)),
-        viewModel: EditorViewModel
+        viewModel: EditorViewModel,
+        keybindingHandler: KeybindingHandler? = nil,
+        vimModeHandler: VimModeHandler? = nil
     ) {
         self._text = text
         self._selection = selection
         self.viewModel = viewModel
+        self.keybindingHandler = keybindingHandler
+        self.vimModeHandler = vimModeHandler
     }
 
     // MARK: - NSViewRepresentable
@@ -47,6 +53,8 @@ public struct TymarkEditorView: NSViewRepresentable {
 
         // Set the text
         textView.setMarkdown(text)
+        textView.keybindingHandler = keybindingHandler
+        textView.vimModeHandler = vimModeHandler
 
         // Set the coordinator as delegate
         textView.delegate = context.coordinator
@@ -72,6 +80,14 @@ public struct TymarkEditorView: NSViewRepresentable {
         if viewModel.theme != context.coordinator.lastKnownTheme {
             textView.updateTheme(viewModel.theme)
             context.coordinator.lastKnownTheme = viewModel.theme
+        }
+
+        if textView.keybindingHandler !== keybindingHandler {
+            textView.keybindingHandler = keybindingHandler
+        }
+
+        if textView.vimModeHandler !== vimModeHandler {
+            textView.vimModeHandler = vimModeHandler
         }
 
         // Update selection if needed
@@ -357,4 +373,3 @@ public enum ExportFormat {
     case pdf
     case docx
 }
-

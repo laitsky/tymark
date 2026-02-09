@@ -3,7 +3,7 @@ import AppKit
 
 // MARK: - Theme
 
-public struct Theme: Identifiable, Equatable, Codable, Hashable {
+public struct Theme: Identifiable, Equatable, Codable, Hashable, Sendable {
     public let id: UUID
     public var name: String
     public var identifier: String
@@ -50,7 +50,7 @@ public struct Theme: Identifiable, Equatable, Codable, Hashable {
 
 // MARK: - Theme Colors
 
-public struct ThemeColors: Codable, Equatable {
+public struct ThemeColors: Codable, Equatable, Sendable {
     public var background: CodableColor
     public var text: CodableColor
     public var secondaryText: CodableColor
@@ -107,7 +107,7 @@ public struct ThemeColors: Codable, Equatable {
 
 // MARK: - Theme Fonts
 
-public struct ThemeFonts: Codable, Equatable {
+public struct ThemeFonts: Codable, Equatable, Sendable {
     public var body: CodableFont
     public var heading: CodableFont
     public var code: CodableFont
@@ -128,7 +128,7 @@ public struct ThemeFonts: Codable, Equatable {
 
 // MARK: - Theme Spacing
 
-public struct ThemeSpacing: Codable {
+public struct ThemeSpacing: Codable, Sendable {
     public var paragraphSpacing: CGFloat
     public var lineHeight: CGFloat
     public var headingSpacingTop: CGFloat
@@ -177,7 +177,7 @@ extension ThemeSpacing: Equatable {
 
 // MARK: - Editor Settings
 
-public struct EditorSettings: Codable, Equatable {
+public struct EditorSettings: Codable, Equatable, Sendable {
     public var showLineNumbers: Bool
     public var showInvisibles: Bool
     public var wrapLines: Bool
@@ -207,7 +207,7 @@ public struct EditorSettings: Codable, Equatable {
 
 // MARK: - Codable Color
 
-public struct CodableColor: Codable, Equatable {
+public struct CodableColor: Codable, Equatable, Sendable {
     public var red: CGFloat
     public var green: CGFloat
     public var blue: CGFloat
@@ -252,7 +252,7 @@ public struct CodableColor: Codable, Equatable {
 
 // MARK: - Codable Font
 
-public struct CodableFont: Codable, Equatable {
+public struct CodableFont: Codable, Equatable, Sendable {
     public var family: String
     public var size: CGFloat
     public var weight: String
@@ -326,7 +326,7 @@ public struct CodableFont: Codable, Equatable {
 
 // MARK: - NSEdgeInsets Codable
 
-extension NSEdgeInsets: Codable {
+extension NSEdgeInsets: @retroactive Codable {
     enum CodingKeys: String, CodingKey {
         case top, left, bottom, right
     }

@@ -342,7 +342,7 @@ public struct LanguageDefinition {
 
 // MARK: - Syntax Theme
 
-public struct SyntaxTheme {
+public struct SyntaxTheme: @unchecked Sendable {
     public var font: NSFont
     public var textColor: NSColor
     public var keywordColor: NSColor
@@ -390,10 +390,10 @@ public struct SyntaxTheme {
 
 // MARK: - Language Provider
 
-public final class LanguageProvider {
+public final class LanguageProvider: @unchecked Sendable {
     public static let shared = LanguageProvider()
 
-    private var languageAliases: [String: String] = [
+    private let languageAliases: [String: String] = [
         "js": "javascript",
         "ts": "typescript",
         "py": "python",
@@ -404,7 +404,6 @@ public final class LanguageProvider {
         "md": "markdown",
         "mdown": "markdown",
         "mkd": "markdown",
-        "yml": "yaml",
         "yml": "yaml",
         "sh": "bash",
         "zsh": "bash",

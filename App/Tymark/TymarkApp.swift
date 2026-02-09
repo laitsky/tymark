@@ -46,6 +46,7 @@ final class AppState: ObservableObject {
     @Published var conflictVersions: [NSFileVersion] = []
     @Published var conflictDocumentURL: URL?
     @Published var exportError: String?
+    @Published var pendingExportFormat: String?
     @Published var isFocusModeEnabled = false
 
     let spotlightIndexer = SpotlightIndexer()
@@ -83,35 +84,45 @@ final class AppState: ObservableObject {
                 name: "New Document",
                 category: .file,
                 defaultShortcut: "cmd+n"
-            ) { /* Handled by system */ },
+            ) { [weak self] in
+                self?.sendAppAction("newDocument:")
+            },
 
             CommandDefinition(
                 id: "file.open",
                 name: "Open Document",
                 category: .file,
                 defaultShortcut: "cmd+o"
-            ) { /* Handled by system */ },
+            ) { [weak self] in
+                self?.openDocument()
+            },
 
             CommandDefinition(
                 id: "file.save",
                 name: "Save",
                 category: .file,
                 defaultShortcut: "cmd+s"
-            ) { /* Handled by system */ },
+            ) { [weak self] in
+                self?.sendAppAction("saveDocument:")
+            },
 
             CommandDefinition(
                 id: "file.saveAs",
                 name: "Save As...",
                 category: .file,
                 defaultShortcut: "cmd+shift+s"
-            ) { /* Handled by system */ },
+            ) { [weak self] in
+                self?.sendAppAction("saveDocumentAs:")
+            },
 
             CommandDefinition(
                 id: "file.close",
                 name: "Close",
                 category: .file,
                 defaultShortcut: "cmd+w"
-            ) { /* Handled by system */ },
+            ) { [weak self] in
+                self?.sendAppAction("performClose:")
+            },
 
             // Edit commands
             CommandDefinition(
@@ -119,42 +130,54 @@ final class AppState: ObservableObject {
                 name: "Undo",
                 category: .edit,
                 defaultShortcut: "cmd+z"
-            ) { /* Handled by system responder chain */ },
+            ) { [weak self] in
+                self?.sendAppAction("undo:")
+            },
 
             CommandDefinition(
                 id: "edit.redo",
                 name: "Redo",
                 category: .edit,
                 defaultShortcut: "cmd+shift+z"
-            ) { /* Handled by system responder chain */ },
+            ) { [weak self] in
+                self?.sendAppAction("redo:")
+            },
 
             CommandDefinition(
                 id: "edit.cut",
                 name: "Cut",
                 category: .edit,
                 defaultShortcut: "cmd+x"
-            ) { /* Handled by system responder chain */ },
+            ) { [weak self] in
+                self?.sendAppAction("cut:")
+            },
 
             CommandDefinition(
                 id: "edit.copy",
                 name: "Copy",
                 category: .edit,
                 defaultShortcut: "cmd+c"
-            ) { /* Handled by system responder chain */ },
+            ) { [weak self] in
+                self?.sendAppAction("copy:")
+            },
 
             CommandDefinition(
                 id: "edit.paste",
                 name: "Paste",
                 category: .edit,
                 defaultShortcut: "cmd+v"
-            ) { /* Handled by system responder chain */ },
+            ) { [weak self] in
+                self?.sendAppAction("paste:")
+            },
 
             CommandDefinition(
                 id: "edit.selectAll",
                 name: "Select All",
                 category: .edit,
                 defaultShortcut: "cmd+a"
-            ) { /* Handled by system responder chain */ },
+            ) { [weak self] in
+                self?.sendAppAction("selectAll:")
+            },
 
             // View commands
             CommandDefinition(
@@ -163,7 +186,7 @@ final class AppState: ObservableObject {
                 category: .view,
                 defaultShortcut: "cmd+shift+p"
             ) { [weak self] in
-                self?.isCommandPaletteVisible = true
+                self?.isCommandPaletteVisible.toggle()
             },
 
             CommandDefinition(
@@ -197,171 +220,195 @@ final class AppState: ObservableObject {
                 id: "view.toggleSourceMode",
                 name: "Toggle Source Mode",
                 category: .view,
-                defaultShortcut: "cmd+/"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+/",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "view.zoomIn",
                 name: "Zoom In",
                 category: .view,
-                defaultShortcut: "cmd+="
-            ) { /* Zoom handled by editor */ },
+                defaultShortcut: "cmd+=",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "view.zoomOut",
                 name: "Zoom Out",
                 category: .view,
-                defaultShortcut: "cmd+-"
-            ) { /* Zoom handled by editor */ },
+                defaultShortcut: "cmd+-",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "view.resetZoom",
                 name: "Reset Zoom",
                 category: .view,
-                defaultShortcut: "cmd+0"
-            ) { /* Zoom handled by editor */ },
+                defaultShortcut: "cmd+0",
+                isEnabled: { false }
+            ) { },
 
             // Format commands
             CommandDefinition(
                 id: "format.bold",
                 name: "Bold",
                 category: .format,
-                defaultShortcut: "cmd+b"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+b",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.italic",
                 name: "Italic",
                 category: .format,
-                defaultShortcut: "cmd+i"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+i",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.strikethrough",
                 name: "Strikethrough",
                 category: .format,
-                defaultShortcut: "cmd+shift+x"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+x",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.inlineCode",
                 name: "Inline Code",
                 category: .format,
-                defaultShortcut: "cmd+e"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+e",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.link",
                 name: "Insert Link",
                 category: .format,
-                defaultShortcut: "cmd+k"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+k",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.heading1",
                 name: "Heading 1",
                 category: .format,
-                defaultShortcut: "cmd+1"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+1",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.heading2",
                 name: "Heading 2",
                 category: .format,
-                defaultShortcut: "cmd+2"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+2",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.heading3",
                 name: "Heading 3",
                 category: .format,
-                defaultShortcut: "cmd+3"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+3",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.heading4",
                 name: "Heading 4",
                 category: .format,
-                defaultShortcut: "cmd+4"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+4",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.heading5",
                 name: "Heading 5",
                 category: .format,
-                defaultShortcut: "cmd+5"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+5",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.heading6",
                 name: "Heading 6",
                 category: .format,
-                defaultShortcut: "cmd+6"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+6",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.orderedList",
                 name: "Ordered List",
                 category: .format,
-                defaultShortcut: "cmd+shift+7"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+7",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.unorderedList",
                 name: "Unordered List",
                 category: .format,
-                defaultShortcut: "cmd+shift+8"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+8",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.taskList",
                 name: "Task List",
                 category: .format,
-                defaultShortcut: "cmd+shift+9"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+9",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.blockquote",
                 name: "Blockquote",
                 category: .format,
-                defaultShortcut: "cmd+shift+."
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+.",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.codeBlock",
                 name: "Code Block",
                 category: .format,
-                defaultShortcut: "cmd+shift+c"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+c",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "format.horizontalRule",
                 name: "Horizontal Rule",
                 category: .format,
-                defaultShortcut: "cmd+shift+-"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+-",
+                isEnabled: { false }
+            ) { },
 
             // Navigate commands
             CommandDefinition(
                 id: "navigate.moveLineUp",
                 name: "Move Line Up",
                 category: .navigate,
-                defaultShortcut: "alt+up"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "alt+up",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "navigate.moveLineDown",
                 name: "Move Line Down",
                 category: .navigate,
-                defaultShortcut: "alt+down"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "alt+down",
+                isEnabled: { false }
+            ) { },
 
             CommandDefinition(
                 id: "navigate.duplicateLine",
                 name: "Duplicate Line",
                 category: .navigate,
-                defaultShortcut: "cmd+shift+d"
-            ) { /* Dispatched to editor */ },
+                defaultShortcut: "cmd+shift+d",
+                isEnabled: { false }
+            ) { },
 
             // Export commands
             CommandDefinition(
@@ -369,26 +416,34 @@ final class AppState: ObservableObject {
                 name: "Export as HTML",
                 category: .export,
                 defaultShortcut: "cmd+shift+e"
-            ) { /* Handled via export action */ },
+            ) { [weak self] in
+                self?.pendingExportFormat = "html"
+            },
 
             CommandDefinition(
                 id: "export.pdf",
                 name: "Export as PDF",
                 category: .export,
                 defaultShortcut: "cmd+alt+p"
-            ) { /* Handled via export action */ },
+            ) { [weak self] in
+                self?.pendingExportFormat = "pdf"
+            },
 
             CommandDefinition(
                 id: "export.docx",
                 name: "Export as Word",
                 category: .export
-            ) { /* Handled via export action */ },
+            ) { [weak self] in
+                self?.pendingExportFormat = "docx"
+            },
 
             CommandDefinition(
                 id: "export.rtf",
                 name: "Export as RTF",
                 category: .export
-            ) { /* Handled via export action */ },
+            ) { [weak self] in
+                self?.pendingExportFormat = "rtf"
+            },
 
             // Tools
             CommandDefinition(
@@ -399,6 +454,14 @@ final class AppState: ObservableObject {
                 self?.vimModeHandler.isEnabled.toggle()
             },
         ])
+    }
+
+    private func sendAppAction(_ selector: String) {
+        NSApp.sendAction(Selector(selector), to: nil, from: nil)
+    }
+
+    func openDocument() {
+        NSDocumentController.shared.openDocument(nil)
     }
 }
 
@@ -429,11 +492,21 @@ final class TymarkDocumentModel: ReferenceFileDocument, @unchecked Sendable {
     // MARK: - ReferenceFileDocument
 
     static var readableContentTypes: [UTType] {
-        [.plainText, .markdown]
+        var types: Set<UTType> = [.plainText, .markdown]
+        ["md", "markdown", "mdown", "mkd"].forEach { ext in
+            if let type = UTType(filenameExtension: ext) {
+                types.insert(type)
+            }
+        }
+        return Array(types)
     }
 
     static var writableContentTypes: [UTType] {
-        [.plainText, .markdown]
+        var types: Set<UTType> = [.plainText, .markdown]
+        if let mdType = UTType(filenameExtension: "md") {
+            types.insert(mdType)
+        }
+        return Array(types)
     }
 
     convenience init(configuration: ReadConfiguration) throws {
@@ -490,7 +563,9 @@ struct ContentView: View {
                 TymarkEditorView(
                     text: $document.content,
                     selection: $selection,
-                    viewModel: editorViewModel
+                    viewModel: editorViewModel,
+                    keybindingHandler: appState.keybindingHandler,
+                    vimModeHandler: appState.vimModeHandler
                 )
                 .frame(minWidth: 400, minHeight: 300)
 
@@ -506,6 +581,11 @@ struct ContentView: View {
                     Button(action: { appState.isSidebarVisible.toggle() }) {
                         Image(systemName: appState.isSidebarVisible ? "sidebar.left" : "sidebar.left.fill")
                     }
+
+                    Button(action: { appState.openDocument() }) {
+                        Image(systemName: "folder")
+                    }
+                    .help("Open Document")
 
                     Spacer()
 
@@ -541,7 +621,7 @@ struct ContentView: View {
                         Image(systemName: "square.and.arrow.up")
                     }
 
-                    Button(action: { appState.isCommandPaletteVisible = true }) {
+                    Button(action: { appState.isCommandPaletteVisible.toggle() }) {
                         Image(systemName: "command")
                     }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
@@ -590,6 +670,11 @@ struct ContentView: View {
                     title: document.metadata.title
                 )
             }
+        }
+        .onChange(of: appState.pendingExportFormat) { _, newValue in
+            guard let format = newValue else { return }
+            exportDocument(format: format)
+            appState.pendingExportFormat = nil
         }
     }
 
@@ -852,6 +937,7 @@ struct CommandPaletteView: View {
     @ObservedObject var registry: CommandRegistry
     @State private var searchText = ""
     @State private var selectedIndex = 0
+    @FocusState private var isSearchFieldFocused: Bool
 
     var filteredCommands: [CommandDefinition] {
         registry.search(query: searchText)
@@ -866,9 +952,19 @@ struct CommandPaletteView: View {
                 TextField("Type a command...", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 16))
+                    .focused($isSearchFieldFocused)
                     .onSubmit {
                         executeSelectedCommand()
                     }
+
+                Button {
+                    isVisible = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
             }
             .padding(12)
             .background(Color(.controlBackgroundColor))
@@ -881,13 +977,15 @@ struct CommandPaletteView: View {
                     CommandPaletteRow(
                         command: command,
                         shortcut: registry.shortcut(for: command.id),
-                        isSelected: index == selectedIndex
+                        isSelected: index == selectedIndex,
+                        isEnabled: command.isEnabled()
                     )
                     .id(command.id)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        command.execute()
-                        isVisible = false
+                        if registry.execute(command.id) {
+                            isVisible = false
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -899,6 +997,9 @@ struct CommandPaletteView: View {
             }
         }
         .frame(width: 550, height: 420)
+        .onAppear {
+            isSearchFieldFocused = true
+        }
         .onChange(of: searchText) { _, _ in
             selectedIndex = 0
         }
@@ -922,8 +1023,10 @@ struct CommandPaletteView: View {
 
     private func executeSelectedCommand() {
         guard selectedIndex < filteredCommands.count else { return }
-        filteredCommands[selectedIndex].execute()
-        isVisible = false
+        let selected = filteredCommands[selectedIndex]
+        if registry.execute(selected.id) {
+            isVisible = false
+        }
     }
 }
 
@@ -933,6 +1036,7 @@ struct CommandPaletteRow: View {
     let command: CommandDefinition
     let shortcut: String?
     let isSelected: Bool
+    let isEnabled: Bool
 
     var body: some View {
         HStack {
@@ -959,6 +1063,7 @@ struct CommandPaletteRow: View {
         .padding(.vertical, 2)
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
         .cornerRadius(4)
+        .opacity(isEnabled ? 1.0 : 0.5)
     }
 }
 
@@ -1268,7 +1373,7 @@ struct TymarkCommands: Commands {
             .keyboardShortcut("b", modifiers: [.command, .shift])
 
             Button("Command Palette") {
-                appState.isCommandPaletteVisible = true
+                appState.isCommandPaletteVisible.toggle()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
 
@@ -1281,7 +1386,10 @@ struct TymarkCommands: Commands {
 
             Divider()
 
-            Toggle("Vim Mode", isOn: $appState.vimModeHandler.isEnabled)
+            Toggle("Vim Mode", isOn: Binding(
+                get: { appState.vimModeHandler.isEnabled },
+                set: { appState.vimModeHandler.isEnabled = $0 }
+            ))
         }
 
         CommandMenu("Export") {

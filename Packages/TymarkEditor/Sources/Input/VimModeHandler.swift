@@ -89,7 +89,8 @@ public final class VimModeHandler: ObservableObject {
     /// Returns `true` if the event was consumed.
     public func handleKeyEvent(_ event: NSEvent) -> Bool {
         guard isEnabled else { return false }
-        guard let chars = event.charactersIgnoringModifiers else { return false }
+        guard let chars = event.characters, !chars.isEmpty else { return false }
+        let baseChars = event.charactersIgnoringModifiers ?? chars
 
         // In insert mode, only handle Escape to return to normal
         if mode == .insert {
@@ -107,7 +108,7 @@ public final class VimModeHandler: ObservableObject {
         }
 
         // Normal mode
-        return handleNormalMode(event, chars: chars)
+        return handleNormalMode(event, chars: chars, baseChars: baseChars)
     }
 
     /// Transition to a specific mode.
@@ -144,7 +145,7 @@ public final class VimModeHandler: ObservableObject {
 
     // MARK: - Normal Mode
 
-    private func handleNormalMode(_ event: NSEvent, chars: String) -> Bool {
+    private func handleNormalMode(_ event: NSEvent, chars: String, baseChars: String) -> Bool {
         // Handle escape
         if event.keyCode == 53 {
             setMode(.normal)
@@ -178,7 +179,7 @@ public final class VimModeHandler: ObservableObject {
         }
 
         // Handle single key commands
-        let handled = executeSingleKey(chars, event: event, count: count)
+        let handled = executeSingleKey(chars, baseChars: baseChars, event: event, count: count)
 
         if handled {
             pendingKeys = ""
@@ -188,15 +189,20 @@ public final class VimModeHandler: ObservableObject {
         return handled
     }
 
-    private func executeSingleKey(_ chars: String, event: NSEvent, count: Int) -> Bool {
+    private func executeSingleKey(_ chars: String, baseChars: String, event: NSEvent, count: Int) -> Bool {
         guard let tv = textView else { return false }
+
+        // Do not consume Command/Option shortcuts in normal mode.
+        if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
+            return false
+        }
 
         switch chars {
         // Ctrl+key combos must come before plain keys to avoid being shadowed
-        case "f" where event.modifierFlags.contains(.control):
+        case _ where baseChars == "f" && event.modifierFlags.contains(.control):
             executeAction(.move(.pageDown), count: count)
             return true
-        case "b" where event.modifierFlags.contains(.control):
+        case _ where baseChars == "b" && event.modifierFlags.contains(.control):
             executeAction(.move(.pageUp), count: count)
             return true
 

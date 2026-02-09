@@ -3,7 +3,7 @@ import Markdown
 
 // MARK: - Parser Configuration
 
-public struct ParserConfiguration {
+public struct ParserConfiguration: Sendable {
     public var enableGitHubFlavoredMarkdown: Bool
     public var enableStrikethrough: Bool
     public var enableTables: Bool

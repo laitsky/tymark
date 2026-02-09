@@ -56,43 +56,10 @@ public final class DocumentVersionManager: ObservableObject {
     public func loadVersions(for url: URL) {
         isLoadingVersions = true
 
-        Task.detached { [weak self] in
-            let fileVersions = NSFileVersion.otherVersionsOfItem(at: url) ?? []
-            let currentVersion = NSFileVersion.currentVersionOfItem(at: url)
-
-            var documentVersions: [DocumentVersion] = []
-
-            // Add current version first
-            if let current = currentVersion {
-                let preview = self?.loadContentPreview(from: url)
-                documentVersions.append(
-                    DocumentVersion(
-                        fileVersion: current,
-                        isCurrentVersion: true,
-                        contentPreview: preview
-                    )
-                )
-            }
-
-            // Add other versions sorted by date (newest first)
-            let sorted = fileVersions.sorted {
-                ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast)
-            }
-
-            for version in sorted {
-                let preview = self?.loadContentPreview(from: version.url)
-                documentVersions.append(
-                    DocumentVersion(
-                        fileVersion: version,
-                        contentPreview: preview
-                    )
-                )
-            }
-
-            await MainActor.run { [weak self] in
-                self?.versions = documentVersions
-                self?.isLoadingVersions = false
-            }
+        Task(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            defer { self.isLoadingVersions = false }
+            self.versions = buildVersions(for: url)
         }
     }
 
@@ -136,6 +103,40 @@ public final class DocumentVersionManager: ObservableObject {
     }
 
     // MARK: - Private Methods
+
+    private func buildVersions(for url: URL) -> [DocumentVersion] {
+        let fileVersions = NSFileVersion.otherVersionsOfItem(at: url) ?? []
+        let currentVersion = NSFileVersion.currentVersionOfItem(at: url)
+
+        var documentVersions: [DocumentVersion] = []
+
+        if let current = currentVersion {
+            let preview = loadContentPreview(from: url)
+            documentVersions.append(
+                DocumentVersion(
+                    fileVersion: current,
+                    isCurrentVersion: true,
+                    contentPreview: preview
+                )
+            )
+        }
+
+        let sorted = fileVersions.sorted {
+            ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast)
+        }
+
+        for version in sorted {
+            let preview = loadContentPreview(from: version.url)
+            documentVersions.append(
+                DocumentVersion(
+                    fileVersion: version,
+                    contentPreview: preview
+                )
+            )
+        }
+
+        return documentVersions
+    }
 
     private nonisolated func loadContentPreview(from url: URL) -> String? {
         guard let data = try? Data(contentsOf: url),

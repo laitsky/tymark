@@ -159,6 +159,9 @@ public final class WorkspaceManager: ObservableObject {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
 
         workspaces[index].rootURL = url
+        if currentWorkspace?.id == workspaceID {
+            currentWorkspace = workspaces[index]
+        }
         saveWorkspaces()
 
         // Refresh file tree
@@ -173,6 +176,9 @@ public final class WorkspaceManager: ObservableObject {
 
         let fileTree = buildFileTree(from: rootURL)
         workspaces[index].openFiles = fileTree
+        if currentWorkspace?.id == workspaceID {
+            currentWorkspace = workspaces[index]
+        }
     }
 
     public func expandDirectory(_ fileID: UUID, in workspaceID: UUID) {
@@ -195,7 +201,10 @@ public final class WorkspaceManager: ObservableObject {
             return false
         }
 
-        updateFileTree(&workspaces[workspaceIndex].openFiles)
+        _ = updateFileTree(&workspaces[workspaceIndex].openFiles)
+        if currentWorkspace?.id == workspaceID {
+            currentWorkspace = workspaces[workspaceIndex]
+        }
     }
 
     public func selectFile(_ file: WorkspaceFile) {
@@ -225,7 +234,11 @@ public final class WorkspaceManager: ObservableObject {
             if workspace.recentFiles.count > 10 {
                 workspace.recentFiles.removeLast()
             }
+            if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
+                workspaces[index].recentFiles = workspace.recentFiles
+            }
             currentWorkspace = workspace
+            saveWorkspaces()
         }
 
         // Notify callback
@@ -381,8 +394,11 @@ public final class WorkspaceManager: ObservableObject {
         }
 
         if var workspace = currentWorkspace {
-            updateInFiles(&workspace.openFiles)
+            _ = updateInFiles(&workspace.openFiles)
             currentWorkspace = workspace
+            if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
+                workspaces[index].openFiles = workspace.openFiles
+            }
         }
     }
 
@@ -401,8 +417,11 @@ public final class WorkspaceManager: ObservableObject {
         }
 
         if var workspace = currentWorkspace {
-            updateInFiles(&workspace.openFiles)
+            _ = updateInFiles(&workspace.openFiles)
             currentWorkspace = workspace
+            if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
+                workspaces[index].openFiles = workspace.openFiles
+            }
         }
     }
 

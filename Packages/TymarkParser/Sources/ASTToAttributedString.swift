@@ -33,7 +33,7 @@ public struct TymarkRenderingAttribute {
 
 // MARK: - Rendering Context
 
-public struct RenderingContext {
+public struct RenderingContext: @unchecked Sendable {
     public var isSourceMode: Bool
     public var headingFontSizes: [Int: CGFloat]
     public var baseFont: TymarkFont

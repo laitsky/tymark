@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Keybinding Entry
 
-public struct KeybindingEntry: Codable, Equatable, Identifiable {
+public struct KeybindingEntry: Codable, Equatable, Identifiable, Sendable {
     public var id: String { commandID }
     public let commandID: String
     public let key: String
@@ -23,7 +23,7 @@ public struct KeybindingEntry: Codable, Equatable, Identifiable {
 
 // MARK: - Keybinding Configuration
 
-public struct KeybindingConfiguration: Codable, Equatable {
+public struct KeybindingConfiguration: Codable, Equatable, Sendable {
     public var version: Int
     public var bindings: [KeybindingEntry]
 

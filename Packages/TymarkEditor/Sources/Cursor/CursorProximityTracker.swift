@@ -3,6 +3,7 @@ import TymarkParser
 
 // MARK: - Cursor Proximity Tracker Delegate
 
+@MainActor
 public protocol CursorProximityTrackerDelegate: AnyObject {
     func cursorProximityTracker(_ tracker: CursorProximityTracker, didUpdateLocation location: Int)
     func cursorProximityTracker(_ tracker: CursorProximityTracker, didEnterNode node: TymarkNode)
@@ -17,6 +18,7 @@ public extension CursorProximityTrackerDelegate {
 
 // MARK: - Cursor Proximity Tracker
 
+@MainActor
 public final class CursorProximityTracker {
 
     // MARK: - Properties
@@ -86,8 +88,6 @@ public final class CursorProximityTracker {
     // MARK: - Private Methods
 
     private func detectNodeTransitions(from oldLocation: Int, to newLocation: Int) {
-        // Determine if cursor crossed any significant boundaries
-        let movedForward = newLocation > oldLocation
         let distance = abs(newLocation - oldLocation)
 
         // Skip processing for small movements

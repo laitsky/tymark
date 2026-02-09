@@ -74,6 +74,7 @@ public final class CommandRegistry: ObservableObject {
 
     public func unregister(_ commandID: String) {
         commands.removeValue(forKey: commandID)
+        shortcutOverrides.removeValue(forKey: commandID)
         sortedCommandsCache = nil
     }
 
@@ -94,26 +95,50 @@ public final class CommandRegistry: ObservableObject {
     }
 
     public func shortcut(for commandID: String) -> String? {
-        return shortcutOverrides[commandID] ?? commands[commandID]?.defaultShortcut
+        guard let command = commands[commandID] else { return nil }
+
+        if let override = shortcutOverrides[commandID] {
+            return KeyComboParser.normalize(override)
+        }
+
+        guard let defaultShortcut = command.defaultShortcut else { return nil }
+        return KeyComboParser.normalize(defaultShortcut)
     }
 
     public func commandID(for shortcut: String) -> String? {
+        let normalizedShortcut = KeyComboParser.normalize(shortcut)
+        guard !normalizedShortcut.isEmpty else { return nil }
+
         // Check overrides first
-        if let id = shortcutOverrides.first(where: { $0.value == shortcut.lowercased() })?.key {
+        if let id = shortcutOverrides.first(where: {
+            commands[$0.key] != nil &&
+            KeyComboParser.normalize($0.value) == normalizedShortcut
+        })?.key {
             return id
         }
 
-        // Check defaults
-        return commands.values.first(where: {
-            $0.defaultShortcut?.lowercased() == shortcut.lowercased()
+        // Check defaults, but only for commands without overrides.
+        return sortedCommands.first(where: { command in
+            guard shortcutOverrides[command.id] == nil,
+                  let defaultShortcut = command.defaultShortcut else {
+                return false
+            }
+            return KeyComboParser.normalize(defaultShortcut) == normalizedShortcut
         })?.id
     }
 
     // MARK: - Shortcut Customization
 
     public func setShortcut(_ shortcut: String?, for commandID: String) {
+        guard commands[commandID] != nil else { return }
+
         if let shortcut = shortcut {
-            shortcutOverrides[commandID] = shortcut.lowercased()
+            let normalizedShortcut = KeyComboParser.normalize(shortcut)
+            if normalizedShortcut.isEmpty {
+                shortcutOverrides.removeValue(forKey: commandID)
+            } else {
+                shortcutOverrides[commandID] = normalizedShortcut
+            }
         } else {
             shortcutOverrides.removeValue(forKey: commandID)
         }
@@ -163,7 +188,11 @@ public final class CommandRegistry: ObservableObject {
               let overrides = try? JSONDecoder().decode([String: String].self, from: data) else {
             return
         }
-        shortcutOverrides = overrides
+        shortcutOverrides = overrides.reduce(into: [:]) { result, entry in
+            let normalizedShortcut = KeyComboParser.normalize(entry.value)
+            guard !normalizedShortcut.isEmpty else { return }
+            result[entry.key] = normalizedShortcut
+        }
     }
 
     private func saveShortcutOverrides() {
@@ -214,7 +243,7 @@ public enum KeyComboParser {
 
     /// Converts a human-readable shortcut string like "Cmd+Shift+P" to a normalized key combo.
     public static func normalize(_ shortcut: String) -> String {
-        let parts = shortcut.lowercased()
+        let rawParts = shortcut.lowercased()
             .replacingOccurrences(of: "⌘", with: "cmd")
             .replacingOccurrences(of: "⇧", with: "shift")
             .replacingOccurrences(of: "⌥", with: "alt")
@@ -222,12 +251,34 @@ public enum KeyComboParser {
             .components(separatedBy: "+")
             .map { $0.trimmingCharacters(in: .whitespaces) }
 
-        return parts.joined(separator: "+")
+        var modifierSet = Set<String>()
+        var keys: [String] = []
+
+        for rawPart in rawParts where !rawPart.isEmpty {
+            let canonical = canonicalPart(rawPart)
+            switch canonical {
+            case "cmd", "ctrl", "alt", "shift":
+                modifierSet.insert(canonical)
+            default:
+                keys.append(canonical)
+            }
+        }
+
+        var normalizedParts: [String] = []
+        for modifier in ["cmd", "ctrl", "alt", "shift"] where modifierSet.contains(modifier) {
+            normalizedParts.append(modifier)
+        }
+        normalizedParts.append(contentsOf: keys)
+
+        return normalizedParts.joined(separator: "+")
     }
 
     /// Converts a normalized key combo to a human-readable display string.
     public static func displayString(for keyCombo: String) -> String {
-        let parts = keyCombo.components(separatedBy: "+")
+        let normalized = normalize(keyCombo)
+        guard !normalized.isEmpty else { return "" }
+
+        let parts = normalized.components(separatedBy: "+")
         var display: [String] = []
 
         for part in parts {
@@ -264,6 +315,18 @@ public enum KeyComboParser {
         case 126: return "up"
         case 49: return "space"
         default: return chars
+        }
+    }
+
+    private static func canonicalPart(_ part: String) -> String {
+        switch part {
+        case "command": return "cmd"
+        case "control": return "ctrl"
+        case "option", "opt": return "alt"
+        case "enter": return "return"
+        case "esc": return "escape"
+        case "backspace": return "delete"
+        default: return part
         }
     }
 }

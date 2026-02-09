@@ -16,6 +16,16 @@ public final class TymarkTextView: NSTextView {
     private var isRenderingInProgress = false
     private var pendingRender = false
 
+    public weak var keybindingHandler: KeybindingHandler?
+    public weak var vimModeHandler: VimModeHandler? {
+        didSet {
+            if oldValue?.textView === self {
+                oldValue?.textView = nil
+            }
+            vimModeHandler?.textView = self
+        }
+    }
+
     // MARK: - Initialization
 
     public init(frame: NSRect, theme: Theme) {
@@ -251,6 +261,18 @@ public final class TymarkTextView: NSTextView {
 
     // MARK: - Overrides
 
+    public override func keyDown(with event: NSEvent) {
+        if vimModeHandler?.handleKeyEvent(event) == true {
+            return
+        }
+
+        if keybindingHandler?.handleKeyEvent(event) == true {
+            return
+        }
+
+        super.keyDown(with: event)
+    }
+
     public override func insertText(_ insertString: Any, replacementRange: NSRange) {
         super.insertText(insertString, replacementRange: replacementRange)
 
@@ -353,6 +375,7 @@ public final class TymarkTextView: NSTextView {
 
 // MARK: - Cursor Proximity Tracker Delegate
 
+@MainActor
 extension TymarkTextView: CursorProximityTrackerDelegate {
     public func cursorProximityTracker(_ tracker: CursorProximityTracker, didUpdateLocation location: Int) {
         // Intentionally empty: updateCursorProximity() already drives the tracker,

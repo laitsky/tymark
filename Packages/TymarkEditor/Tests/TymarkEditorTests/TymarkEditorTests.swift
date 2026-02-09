@@ -739,6 +739,15 @@ final class CommandRegistryTests: XCTestCase {
         XCTAssertEqual(registry.commandID(for: "cmd+shift+s"), "test.cmd")
     }
 
+    func testCommandIDForShortcutDoesNotMatchDefaultWhenOverridden() {
+        let command = makeCommand(id: "test.cmd", defaultShortcut: "cmd+s")
+        registry.register(command)
+        registry.setShortcut("ctrl+s", for: "test.cmd")
+
+        XCTAssertNil(registry.commandID(for: "cmd+s"))
+        XCTAssertEqual(registry.commandID(for: "ctrl+s"), "test.cmd")
+    }
+
     func testCommandIDForShortcutReturnsNilWhenNotFound() {
         XCTAssertNil(registry.commandID(for: "cmd+q"))
     }
@@ -763,6 +772,11 @@ final class CommandRegistryTests: XCTestCase {
         registry.register(command)
         registry.setShortcut("Cmd+Shift+S", for: "test.cmd")
         XCTAssertEqual(registry.shortcut(for: "test.cmd"), "cmd+shift+s")
+    }
+
+    func testSetShortcutIgnoresUnknownCommand() {
+        registry.setShortcut("cmd+x", for: "does.not.exist")
+        XCTAssertTrue(registry.shortcutOverrides.isEmpty)
     }
 
     func testSetShortcutNilRemovesOverride() {
@@ -1042,6 +1056,14 @@ final class KeyComboParserTests: XCTestCase {
 
     func testNormalizeWithSpaces() {
         XCTAssertEqual(KeyComboParser.normalize("cmd + shift + s"), "cmd+shift+s")
+    }
+
+    func testNormalizeReordersModifiers() {
+        XCTAssertEqual(KeyComboParser.normalize("shift+cmd+s"), "cmd+shift+s")
+    }
+
+    func testNormalizeModifierAliases() {
+        XCTAssertEqual(KeyComboParser.normalize("option+control+s"), "ctrl+alt+s")
     }
 
     // MARK: - displayString

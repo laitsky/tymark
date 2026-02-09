@@ -29,7 +29,7 @@ public final class FuzzySearchEngine {
 
     // MARK: - Configuration
 
-    public struct Configuration {
+    public struct Configuration: Sendable {
         var caseSensitive: Bool
         var maxResults: Int
         var minScore: Double

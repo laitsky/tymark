@@ -329,9 +329,12 @@ public final class KeybindingHandler {
     @MainActor
     private func syncUserOverrides(to registry: CommandRegistry) {
         for entry in configuration.bindings {
+            let normalizedKey = KeyComboParser.normalize(entry.key)
+            guard !normalizedKey.isEmpty else { continue }
+
             let defaultShortcut = registry.command(for: entry.commandID)?.defaultShortcut
-            if entry.key.lowercased() != defaultShortcut?.lowercased() {
-                registry.setShortcut(entry.key, for: entry.commandID)
+            if normalizedKey != defaultShortcut.map(KeyComboParser.normalize) {
+                registry.setShortcut(normalizedKey, for: entry.commandID)
             }
         }
     }
