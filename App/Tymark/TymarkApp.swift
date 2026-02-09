@@ -775,22 +775,27 @@ final class TymarkDocumentModel: ReferenceFileDocument, @unchecked Sendable {
 
     // MARK: - ReferenceFileDocument
 
-    static var readableContentTypes: [UTType] {
-        var types: Set<UTType> = [.plainText, .markdown]
-        ["md", "markdown", "mdown", "mkd"].forEach { ext in
-            if let type = UTType(filenameExtension: ext) {
-                types.insert(type)
+    private static let supportedContentTypes: [UTType] = {
+        // Keep ordering deterministic; SwiftUI uses these to wire document windows.
+        var types: [UTType] = [.plainText]
+
+        for ext in ["md", "markdown", "mdown", "mkd"] {
+            guard let type = UTType(filenameExtension: ext) else { continue }
+            guard type.conforms(to: .text) || type.conforms(to: .plainText) else { continue }
+            if !types.contains(type) {
+                types.append(type)
             }
         }
-        return Array(types)
+
+        return types
+    }()
+
+    static var readableContentTypes: [UTType] {
+        supportedContentTypes
     }
 
     static var writableContentTypes: [UTType] {
-        var types: Set<UTType> = [.plainText, .markdown]
-        if let mdType = UTType(filenameExtension: "md") {
-            types.insert(mdType)
-        }
-        return Array(types)
+        supportedContentTypes
     }
 
     convenience init(configuration: ReadConfiguration) throws {
@@ -1952,13 +1957,5 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         return true
-    }
-}
-
-// MARK: - UTType Extension
-
-extension UTType {
-    static var markdown: UTType {
-        UTType(importedAs: "net.daringfireball.markdown")
     }
 }
