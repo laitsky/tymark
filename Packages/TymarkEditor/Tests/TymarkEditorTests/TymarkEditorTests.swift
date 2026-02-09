@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 import Foundation
 @testable import TymarkEditor
@@ -1677,3 +1678,5 @@ final class KeybindingHandlerRegistryIntegrationTests: XCTestCase {
         XCTAssertEqual(registry.shortcut(for: "cmd.b"), "cmd+b")
     }
 }
+
+#endif

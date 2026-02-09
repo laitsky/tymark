@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import TymarkWorkspace
 
@@ -975,3 +976,5 @@ final class FileOutlineProviderTests: XCTestCase {
         XCTAssertEqual(ids.count, uniqueIDs.count, "All outline items should have unique IDs")
     }
 }
+
+#endif

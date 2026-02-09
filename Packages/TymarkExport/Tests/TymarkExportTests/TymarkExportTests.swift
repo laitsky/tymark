@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import TymarkExport
 import TymarkParser
@@ -671,3 +672,5 @@ private final class StubExporter: Exporter {
         return "stub-export".data(using: .utf8)
     }
 }
+
+#endif

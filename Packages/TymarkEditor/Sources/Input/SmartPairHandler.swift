@@ -36,9 +36,8 @@ public final class SmartPairHandler {
         // Check if it's a closing character that should be skipped
         if closePairs.contains(character) {
             let nsText = text as NSString
-            let nextLocation = location + 1
-            if nextLocation < nsText.length {
-                let nextRange = nsText.rangeOfComposedCharacterSequence(at: nextLocation)
+            if location < nsText.length {
+                let nextRange = nsText.rangeOfComposedCharacterSequence(at: location)
                 if let swiftRange = Range(nextRange, in: text),
                    text[swiftRange].first == character {
                     return ""

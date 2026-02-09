@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import TymarkParser
 
@@ -2021,3 +2022,5 @@ final class TymarkParserTests: XCTestCase {
         XCTAssertTrue(info.isStructuralChange)
     }
 }
+
+#endif

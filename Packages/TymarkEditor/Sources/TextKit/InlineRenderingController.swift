@@ -166,19 +166,24 @@ public final class InlineRenderingController {
     private func shouldFullRender(_ edit: TextEdit) -> Bool {
         // Check if this is a structural change
         let text = textStorage.string
-        let affectedText = (text as NSString).substring(with: edit.range)
+        let nsText = text as NSString
+        let safeLocation = max(0, min(edit.range.location, nsText.length))
+        let safeLength = max(0, min(edit.range.length, nsText.length - safeLocation))
+        let safeRange = NSRange(location: safeLocation, length: safeLength)
+        let affectedText = safeLength > 0 ? nsText.substring(with: safeRange) : ""
+        let changedText = affectedText + edit.replacement
 
         // Structural characters that trigger full re-render
         let structuralChars: Set<Character> = ["\n", "#", "-", "*", "_", "`", "[", "]", "(", ")", "|", ">"]
 
-        for char in affectedText {
+        for char in changedText {
             if structuralChars.contains(char) {
                 return true
             }
         }
 
         // Check for large changes
-        if edit.range.length > 100 {
+        if max(edit.range.length, edit.replacement.count) > 100 {
             return true
         }
 

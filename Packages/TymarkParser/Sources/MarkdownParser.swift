@@ -132,7 +132,8 @@ public final class MarkdownParser: @unchecked Sendable {
             break
         }
         if let child = firstChild {
-            return convertNode(child, in: source, baseLocation: location)
+            let localNode = convertNode(child, in: source, baseLocation: 0)
+            return offsetNode(localNode, by: location)
         }
         return TymarkNode(type: .paragraph, range: NSRange(location: location, length: source.count))
     }
@@ -143,41 +144,43 @@ public final class MarkdownParser: @unchecked Sendable {
         newBlock: TymarkNode,
         editDelta: Int
     ) -> TymarkNode {
-        // Adjust ranges after the edit
-        return adjustRanges(in: oldRoot, replacing: oldBlock, with: newBlock, editDelta: editDelta)
+        // Replace the edited block and keep all sibling/ancestor ranges consistent.
+        return replaceAndAdjust(
+            in: oldRoot,
+            replacing: oldBlock,
+            with: newBlock,
+            editDelta: editDelta
+        )
     }
 
-    private func adjustRanges(
+    private func replaceAndAdjust(
         in node: TymarkNode,
         replacing oldBlock: TymarkNode,
         with newBlock: TymarkNode,
         editDelta: Int
     ) -> TymarkNode {
-        let oldEnd = NSMaxRange(oldBlock.range)
-
-        // Calculate new range
-        let adjustedRange: NSRange
-        if NSEqualRanges(node.range, oldBlock.range) {
-            // This is the replaced block
-            adjustedRange = newBlock.range
-        } else if node.range.location >= oldEnd {
-            // This node is after the edit, shift it
-            let newLocation = node.range.location + editDelta
-            adjustedRange = NSRange(location: newLocation, length: node.range.length)
-        } else if NSMaxRange(node.range) <= oldBlock.range.location {
-            // This node is before the edit, keep it
-            adjustedRange = node.range
-        } else if NSLocationInRange(node.range.location, oldBlock.range) ||
-                  NSLocationInRange(NSMaxRange(node.range), oldBlock.range) {
-            // This node overlaps the edited block - use the new block's range
-            adjustedRange = newBlock.range
-        } else {
-            adjustedRange = node.range
+        // Replace the matching subtree entirely.
+        if node.id == oldBlock.id {
+            return newBlock
         }
 
-        // Recursively adjust children
+        let oldEnd = NSMaxRange(oldBlock.range)
+        let oldStart = oldBlock.range.location
+
+        // Recursively process children first.
         let adjustedChildren = node.children.map { child in
-            adjustRanges(in: child, replacing: oldBlock, with: newBlock, editDelta: editDelta)
+            replaceAndAdjust(in: child, replacing: oldBlock, with: newBlock, editDelta: editDelta)
+        }
+
+        // Then shift/resize current range as needed.
+        var adjustedRange = node.range
+        if node.range.location >= oldEnd {
+            adjustedRange.location += editDelta
+        } else if node.range.location <= oldStart && NSMaxRange(node.range) >= oldEnd {
+            adjustedRange.length = max(0, node.range.length + editDelta)
+        } else if NSIntersectionRange(node.range, oldBlock.range).length > 0 {
+            let newEnd = max(node.range.location, NSMaxRange(node.range) + editDelta)
+            adjustedRange.length = max(0, newEnd - node.range.location)
         }
 
         return TymarkNode(
@@ -186,6 +189,25 @@ public final class MarkdownParser: @unchecked Sendable {
             content: node.content,
             range: adjustedRange,
             children: adjustedChildren,
+            metadata: node.metadata
+        )
+    }
+
+    private func offsetNode(_ node: TymarkNode, by delta: Int) -> TymarkNode {
+        let shiftedRange = delta == 0
+            ? node.range
+            : NSRange(location: node.range.location + delta, length: node.range.length)
+
+        let shiftedChildren = node.children.map { child in
+            offsetNode(child, by: delta)
+        }
+
+        return TymarkNode(
+            id: node.id,
+            type: node.type,
+            content: node.content,
+            range: shiftedRange,
+            children: shiftedChildren,
             metadata: node.metadata
         )
     }

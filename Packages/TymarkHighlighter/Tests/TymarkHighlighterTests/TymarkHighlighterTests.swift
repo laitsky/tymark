@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 import AppKit
 @testable import TymarkHighlighter
@@ -810,3 +811,5 @@ final class LanguageProviderTests: XCTestCase {
         XCTAssertNil(provider.detectLanguage(fromContent: ""))
     }
 }
+
+#endif

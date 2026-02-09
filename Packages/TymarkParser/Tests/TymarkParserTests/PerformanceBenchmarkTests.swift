@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import TymarkParser
 
@@ -315,3 +316,5 @@ final class PerformanceBenchmarkTests: XCTestCase {
         }
     }
 }
+
+#endif

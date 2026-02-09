@@ -9,7 +9,7 @@ public final class TymarkTextView: NSTextView {
     // MARK: - Properties
 
     private let parserState: ParserState
-    private let renderingContext: RenderingContext
+    private var renderingContext: RenderingContext
     private let cursorTracker: CursorProximityTracker
     private var theme: Theme
 
@@ -31,16 +31,7 @@ public final class TymarkTextView: NSTextView {
     public init(frame: NSRect, theme: Theme) {
         self.theme = theme
         self.parserState = ParserState()
-        self.renderingContext = RenderingContext(
-            isSourceMode: false,
-            baseFont: theme.fonts.body.nsFont,
-            baseColor: theme.colors.text.nsColor,
-            codeFont: theme.fonts.code.nsFont,
-            linkColor: theme.colors.link.nsColor,
-            syntaxHiddenColor: theme.colors.syntaxHidden.nsColor,
-            codeBackgroundColor: theme.colors.codeBackground.nsColor,
-            blockquoteColor: theme.colors.secondaryText.nsColor
-        )
+        self.renderingContext = Self.makeRenderingContext(theme: theme)
         self.cursorTracker = CursorProximityTracker()
 
         // Configure text container
@@ -115,7 +106,7 @@ public final class TymarkTextView: NSTextView {
 
     public func updateTheme(_ newTheme: Theme) {
         self.theme = newTheme
-        // Update rendering context with new theme
+        self.renderingContext = Self.makeRenderingContext(theme: newTheme)
         renderDocument()
     }
 
@@ -138,18 +129,15 @@ public final class TymarkTextView: NSTextView {
         let attributedString = converter.convert(parserState.document)
 
         // Replace content while preserving selection if possible
-        let selectedRange = self.selectedRange()
+        let previousSelection = self.selectedRange()
 
         self.textStorage?.setAttributedString(attributedString)
 
-        // Restore selection safely — clamp to valid range
-        let maxRange = NSRange(location: 0, length: attributedString.length)
-        let safeRange = NSIntersectionRange(selectedRange, maxRange)
-        if safeRange.length > 0 || (safeRange.location < attributedString.length) {
-            self.setSelectedRange(safeRange)
-        } else if attributedString.length > 0 {
-            self.setSelectedRange(NSRange(location: attributedString.length, length: 0))
-        }
+        // Restore selection safely by clamping location/length separately.
+        let maxLocation = attributedString.length
+        let safeLocation = max(0, min(previousSelection.location, maxLocation))
+        let safeLength = max(0, min(previousSelection.length, maxLocation - safeLocation))
+        self.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
 
         isRenderingInProgress = false
 
@@ -285,7 +273,9 @@ public final class TymarkTextView: NSTextView {
     public override func doCommand(by selector: Selector) {
         // Handle command shortcuts
         if selector == #selector(insertNewline(_:)) {
-            handleNewline()
+            if !handleNewline() {
+                super.doCommand(by: selector)
+            }
         } else {
             super.doCommand(by: selector)
         }
@@ -319,7 +309,7 @@ public final class TymarkTextView: NSTextView {
 
     private func insertMatchingPair(closing: String) {
         let currentRange = selectedRange()
-        insertText(closing, replacementRange: NSRange(location: currentRange.location, length: 0))
+        super.insertText(closing, replacementRange: NSRange(location: currentRange.location, length: 0))
         setSelectedRange(currentRange)
     }
 
@@ -333,11 +323,11 @@ public final class TymarkTextView: NSTextView {
     }
 
     private func handleEmphasisMarker(_ marker: String) {
-        // Check if we should auto-close emphasis
+        // Check if this is the second marker in a row (for ** / __).
         let location = selectedRange().location
-        let prevChar = location > 0 ? string.charAt(location - 1) : nil
+        let previousChar = location > 1 ? string.charAt(location - 2) : nil
 
-        if prevChar == marker.first {
+        if previousChar == marker.first {
             // Double marker = strong, insert closing pair
             insertMatchingPair(closing: String(repeating: marker, count: 2))
         } else {
@@ -360,7 +350,8 @@ public final class TymarkTextView: NSTextView {
         }
     }
 
-    private func handleNewline() {
+    @discardableResult
+    private func handleNewline() -> Bool {
         let location = selectedRange().location
 
         // Check if we're in a list and should continue it
@@ -369,7 +360,23 @@ public final class TymarkTextView: NSTextView {
             // Continue the list with appropriate marker
             let marker = ordered ? "1. " : "- "
             insertText("\n" + marker, replacementRange: selectedRange())
+            return true
         }
+
+        return false
+    }
+
+    private static func makeRenderingContext(theme: Theme) -> RenderingContext {
+        RenderingContext(
+            isSourceMode: false,
+            baseFont: theme.fonts.body.nsFont,
+            baseColor: theme.colors.text.nsColor,
+            codeFont: theme.fonts.code.nsFont,
+            linkColor: theme.colors.link.nsColor,
+            syntaxHiddenColor: theme.colors.syntaxHidden.nsColor,
+            codeBackgroundColor: theme.colors.codeBackground.nsColor,
+            blockquoteColor: theme.colors.secondaryText.nsColor
+        )
     }
 }
 

@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import TymarkTheme
 
@@ -1646,3 +1647,5 @@ final class NSEdgeInsetsCodableTests: XCTestCase {
         XCTAssertNotNil(json["right"])
     }
 }
+
+#endif

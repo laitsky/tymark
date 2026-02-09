@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import TymarkSync
 
@@ -768,3 +769,5 @@ final class ConflictResolverTests: XCTestCase {
         XCTAssertTrue(result.contains("Shared footer."))
     }
 }
+
+#endif
