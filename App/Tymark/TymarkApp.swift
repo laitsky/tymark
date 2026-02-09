@@ -113,6 +113,49 @@ final class AppState: ObservableObject {
                 defaultShortcut: "cmd+w"
             ) { /* Handled by system */ },
 
+            // Edit commands
+            CommandDefinition(
+                id: "edit.undo",
+                name: "Undo",
+                category: .edit,
+                defaultShortcut: "cmd+z"
+            ) { /* Handled by system responder chain */ },
+
+            CommandDefinition(
+                id: "edit.redo",
+                name: "Redo",
+                category: .edit,
+                defaultShortcut: "cmd+shift+z"
+            ) { /* Handled by system responder chain */ },
+
+            CommandDefinition(
+                id: "edit.cut",
+                name: "Cut",
+                category: .edit,
+                defaultShortcut: "cmd+x"
+            ) { /* Handled by system responder chain */ },
+
+            CommandDefinition(
+                id: "edit.copy",
+                name: "Copy",
+                category: .edit,
+                defaultShortcut: "cmd+c"
+            ) { /* Handled by system responder chain */ },
+
+            CommandDefinition(
+                id: "edit.paste",
+                name: "Paste",
+                category: .edit,
+                defaultShortcut: "cmd+v"
+            ) { /* Handled by system responder chain */ },
+
+            CommandDefinition(
+                id: "edit.selectAll",
+                name: "Select All",
+                category: .edit,
+                defaultShortcut: "cmd+a"
+            ) { /* Handled by system responder chain */ },
+
             // View commands
             CommandDefinition(
                 id: "view.commandPalette",
@@ -126,7 +169,7 @@ final class AppState: ObservableObject {
             CommandDefinition(
                 id: "view.quickOpen",
                 name: "Quick Open",
-                category: .navigate,
+                category: .view,
                 defaultShortcut: "cmd+p"
             ) { [weak self] in
                 self?.isQuickOpenVisible = true
@@ -858,6 +901,22 @@ struct CommandPaletteView: View {
         .frame(width: 550, height: 420)
         .onChange(of: searchText) { _, _ in
             selectedIndex = 0
+        }
+        .onKeyPress(.upArrow) {
+            if selectedIndex > 0 {
+                selectedIndex -= 1
+            }
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            if selectedIndex < filteredCommands.count - 1 {
+                selectedIndex += 1
+            }
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            isVisible = false
+            return .handled
         }
     }
 

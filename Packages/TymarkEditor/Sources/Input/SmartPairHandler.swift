@@ -306,14 +306,11 @@ public final class KeybindingHandler {
     // MARK: - Public API
 
     /// Attach a CommandRegistry so keybindings can dispatch through the command system.
+    /// Only syncs user-modified shortcuts (those that differ from the command's defaultShortcut).
     @MainActor
     public func setCommandRegistry(_ registry: CommandRegistry) {
         self.commandRegistry = registry
-
-        // Sync the configuration's bindings into the registry's shortcut overrides
-        for entry in configuration.bindings {
-            registry.setShortcut(entry.key, for: entry.commandID)
-        }
+        syncUserOverrides(to: registry)
     }
 
     /// Load a new keybinding configuration (e.g., from JSON).
@@ -324,7 +321,16 @@ public final class KeybindingHandler {
         // Re-sync with registry
         if let registry = commandRegistry {
             registry.resetAllShortcuts()
-            for entry in config.bindings {
+            syncUserOverrides(to: registry)
+        }
+    }
+
+    /// Sync only bindings that differ from the command's defaultShortcut into the registry.
+    @MainActor
+    private func syncUserOverrides(to registry: CommandRegistry) {
+        for entry in configuration.bindings {
+            let defaultShortcut = registry.command(for: entry.commandID)?.defaultShortcut
+            if entry.key.lowercased() != defaultShortcut?.lowercased() {
                 registry.setShortcut(entry.key, for: entry.commandID)
             }
         }

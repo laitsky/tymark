@@ -151,12 +151,18 @@ public final class VimModeHandler: ObservableObject {
             return true
         }
 
-        // Build up repeat count
-        if let digit = chars.first, digit.isNumber && digit != "0" && pendingOperator == nil && repeatCount > 0 || (digit.isNumber && digit != "0" && pendingKeys.isEmpty) {
-            if let d = Int(String(digit)) {
-                repeatCount = repeatCount * 10 + d
-                pendingKeys += String(digit)
-                return true
+        // Build up repeat count.
+        // Accept non-zero digits to start a count, and any digit (including 0) to continue.
+        // E.g., "20j" = move down 20 lines. "0" alone = move to line start.
+        if let digit = chars.first, digit.isNumber, pendingOperator == nil {
+            let isStartingNewCount = digit != "0" && repeatCount == 0
+            let isContinuingCount = repeatCount > 0
+            if isStartingNewCount || isContinuingCount {
+                if let d = Int(String(digit)) {
+                    repeatCount = repeatCount * 10 + d
+                    pendingKeys += String(digit)
+                    return true
+                }
             }
         }
 
@@ -186,6 +192,14 @@ public final class VimModeHandler: ObservableObject {
         guard let tv = textView else { return false }
 
         switch chars {
+        // Ctrl+key combos must come before plain keys to avoid being shadowed
+        case "f" where event.modifierFlags.contains(.control):
+            executeAction(.move(.pageDown), count: count)
+            return true
+        case "b" where event.modifierFlags.contains(.control):
+            executeAction(.move(.pageUp), count: count)
+            return true
+
         // Movement
         case "h":
             executeAction(.move(.left), count: count)
@@ -266,6 +280,10 @@ public final class VimModeHandler: ObservableObject {
             pendingOperator = "y"
             pendingKeys = "y"
             return true
+        case "g":
+            pendingOperator = "g"
+            pendingKeys = "g"
+            return true
 
         // Single char operations
         case "x":
@@ -309,14 +327,6 @@ public final class VimModeHandler: ObservableObject {
             }
             return true
 
-        // Scroll
-        case "f" where event.modifierFlags.contains(.control):
-            executeAction(.move(.pageDown), count: count)
-            return true
-        case "b" where event.modifierFlags.contains(.control):
-            executeAction(.move(.pageUp), count: count)
-            return true
-
         default:
             return false
         }
@@ -326,6 +336,19 @@ public final class VimModeHandler: ObservableObject {
 
     private func handleOperatorPending(_ op: String, chars: String, count: Int) -> Bool {
         guard let tv = textView else { return false }
+
+        // Handle "g" prefix commands (gg = go to document start / line N)
+        if op == "g" {
+            if chars == "g" {
+                if repeatCount > 0 {
+                    goToLine(repeatCount)
+                } else {
+                    executeAction(.move(.documentStart), count: 1)
+                }
+                return true
+            }
+            return false
+        }
 
         // Double operator (e.g., dd, cc, yy) operates on current line
         if chars == op {
