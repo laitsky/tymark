@@ -155,4 +155,18 @@ extension TymarkNode {
         }
         return nil
     }
+
+    public func node(withID id: UUID) -> TymarkNode? {
+        if self.id == id {
+            return self
+        }
+
+        for child in children {
+            if let found = child.node(withID: id) {
+                return found
+            }
+        }
+
+        return nil
+    }
 }

@@ -707,12 +707,13 @@ final class TymarkParserTests: XCTestCase {
         """
         let document = parser.parse(markdown)
         let types = document.root.children.map { $0.type }
-        XCTAssertEqual(types.count, 5)
+        XCTAssertEqual(types.count, 6)
         XCTAssertEqual(types[0], .paragraph)
         XCTAssertEqual(types[1], .blockquote)
         XCTAssertEqual(types[2], .paragraph)
         XCTAssertEqual(types[3], .thematicBreak)
-        XCTAssertEqual(types[4], .blockquote)
+        XCTAssertEqual(types[4], .paragraph)
+        XCTAssertEqual(types[5], .blockquote)
     }
 
     // MARK: - 4. Complex Documents: Source Preservation

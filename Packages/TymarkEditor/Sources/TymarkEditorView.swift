@@ -1,6 +1,7 @@
 import SwiftUI
 import TymarkParser
 import TymarkTheme
+import TymarkExport
 
 // MARK: - Tymark Editor SwiftUI View
 
@@ -254,13 +255,11 @@ public final class EditorViewModel: ObservableObject {
     }
 
     private func exportToPDF(document: TymarkDocument) -> Data? {
-        // PDF export would be implemented here
-        return nil
+        return PDFExporter().export(document: document, theme: theme)
     }
 
     private func exportToDOCX(document: TymarkDocument) -> Data? {
-        // DOCX export would be implemented here
-        return nil
+        return DOCXExporter().export(document: document, theme: theme)
     }
 
     private func generateHTML(from document: TymarkDocument) -> String {

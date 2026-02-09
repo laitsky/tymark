@@ -87,6 +87,13 @@ final class AppState: ObservableObject {
         syncStatusTracker.configure(with: networkMonitor)
         commandRegistry.loadShortcutOverrides()
 
+        if UserDefaults.standard.object(forKey: "enableICloudSync") == nil {
+            UserDefaults.standard.set(true, forKey: "enableICloudSync")
+        }
+        if UserDefaults.standard.bool(forKey: "enableICloudSync") {
+            cloudSyncManager.startMonitoring()
+        }
+
         registerCommands()
         keybindingHandler.setCommandRegistry(commandRegistry)
     }
@@ -1838,6 +1845,13 @@ struct SyncSettingsView: View {
             }
         }
         .padding()
+        .onChange(of: enableICloudSync) { _, enabled in
+            if enabled {
+                appState.cloudSyncManager.startMonitoring()
+            } else {
+                appState.cloudSyncManager.stopMonitoring()
+            }
+        }
     }
 }
 

@@ -19,6 +19,11 @@ public final class SmartPairHandler {
     ]
 
     private let closePairs: Set<Character> = [")", "]", "}", "\"", "'", "`"]
+    private let openersForCloser: [Character: Character] = [
+        ")": "(",
+        "]": "[",
+        "}": "{"
+    ]
 
     public var isEnabled: Bool = true
 
@@ -41,6 +46,20 @@ public final class SmartPairHandler {
                 if let swiftRange = Range(nextRange, in: text),
                    text[swiftRange].first == character {
                     return ""
+                }
+
+                // If cursor location points to the opening pair, treat the matching closer
+                // immediately after it as skippable.
+                if location + 1 < nsText.length,
+                   let opener = openersForCloser[character] {
+                    let currentRange = nsText.rangeOfComposedCharacterSequence(at: location)
+                    let afterRange = nsText.rangeOfComposedCharacterSequence(at: location + 1)
+                    if let currentSwiftRange = Range(currentRange, in: text),
+                       let afterSwiftRange = Range(afterRange, in: text),
+                       text[currentSwiftRange].first == opener,
+                       text[afterSwiftRange].first == character {
+                        return ""
+                    }
                 }
             }
         }
@@ -185,6 +204,14 @@ public final class SmartListHandler {
     private func parseListType(from line: String) -> ListType? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
 
+        // Task list
+        if trimmed.hasPrefix("- [ ] ") {
+            return .task(checked: false)
+        }
+        if trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ") {
+            return .task(checked: true)
+        }
+
         // Unordered list
         if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
             let marker = String(trimmed.prefix(2))
@@ -197,14 +224,6 @@ public final class SmartListHandler {
             if let number = Int(numberStr) {
                 return .ordered(number: number)
             }
-        }
-
-        // Task list
-        if trimmed.hasPrefix("- [ ] ") {
-            return .task(checked: false)
-        }
-        if trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ") {
-            return .task(checked: true)
         }
 
         return nil
@@ -261,19 +280,19 @@ public final class SmartListHandler {
     }
 
     private func findMarkerEnd(in line: String) -> Int {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
-            return line.range(of: trimmed.prefix(2))?.upperBound.utf16Offset(in: line) ?? 2
-        }
-
-        if let match = trimmed.range(of: "^\\d+\\. ", options: .regularExpression) {
-            let marker = trimmed[match]
-            return line.range(of: marker)?.upperBound.utf16Offset(in: line) ?? marker.count
-        }
+        let indentation = line.prefix { $0 == " " || $0 == "\t" }
+        let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
 
         if trimmed.hasPrefix("- [ ] ") || trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ") {
-            return line.range(of: trimmed.prefix(6))?.upperBound.utf16Offset(in: line) ?? 6
+            return indentation.utf16.count + 6
+        }
+
+        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
+            return indentation.utf16.count + 2
+        }
+
+        if let match = trimmed.range(of: #"^\d+\.\s"#, options: .regularExpression) {
+            return indentation.utf16.count + trimmed[match].utf16.count
         }
 
         return 0

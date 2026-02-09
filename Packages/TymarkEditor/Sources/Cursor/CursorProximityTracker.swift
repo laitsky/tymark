@@ -24,6 +24,9 @@ public final class CursorProximityTracker {
     // MARK: - Properties
 
     public weak var delegate: CursorProximityTrackerDelegate?
+    /// Supplies the AST node at a given cursor location.
+    /// When provided, the tracker emits enter/exit events as the cursor moves.
+    public var nodeProvider: ((Int) -> TymarkNode?)?
 
     private var currentLocation: Int = 0
     private var currentNode: TymarkNode?
@@ -42,13 +45,14 @@ public final class CursorProximityTracker {
 
     public func updateCursorLocation(_ location: Int) {
         let previousLocation = currentLocation
+        let previousNode = currentNode
         currentLocation = location
 
         // Notify delegate of location change
         delegate?.cursorProximityTracker(self, didUpdateLocation: location)
 
         // Check for node transitions
-        detectNodeTransitions(from: previousLocation, to: location)
+        detectNodeTransitions(from: previousLocation, to: location, previousNode: previousNode)
     }
 
     public func updateNodes(_ nodes: [TymarkNode]) {
@@ -87,14 +91,23 @@ public final class CursorProximityTracker {
 
     // MARK: - Private Methods
 
-    private func detectNodeTransitions(from oldLocation: Int, to newLocation: Int) {
+    private func detectNodeTransitions(from oldLocation: Int, to newLocation: Int, previousNode: TymarkNode?) {
         let distance = abs(newLocation - oldLocation)
 
-        // Skip processing for small movements
-        if distance == 0 { return }
+        // Skip processing for no movement or when we cannot resolve nodes.
+        guard distance > 0, let nodeProvider else { return }
 
-        // Update the current node
-        // This would be called with the actual document structure
+        let newNode = nodeProvider(newLocation)
+        currentNode = newNode
+
+        if previousNode?.id != newNode?.id {
+            if let previousNode {
+                delegate?.cursorProximityTracker(self, didExitNode: previousNode)
+            }
+            if let newNode {
+                delegate?.cursorProximityTracker(self, didEnterNode: newNode)
+            }
+        }
     }
 
     private func isNearCursor(_ node: TymarkNode) -> Bool {
@@ -157,6 +170,8 @@ public final class SelectionManager {
     private let maxHistorySize = 50
 
     public var onSelectionChanged: ((NSRange) -> Void)?
+    /// Supplies the current editor source for word/line selection operations.
+    public var sourceProvider: (() -> String)?
 
     // MARK: - Public API
 
@@ -172,15 +187,52 @@ public final class SelectionManager {
     }
 
     public func selectWord(at location: Int) -> NSRange {
-        // Find word boundaries
-        let wordRange = NSRange(location: location, length: 0) // Placeholder
+        guard let source = sourceProvider?() else {
+            let fallback = NSRange(location: max(0, location), length: 0)
+            updateSelection(fallback)
+            return fallback
+        }
+
+        let nsSource = source as NSString
+        guard nsSource.length > 0 else {
+            let empty = NSRange(location: 0, length: 0)
+            updateSelection(empty)
+            return empty
+        }
+
+        let clampedLocation = max(0, min(location, nsSource.length - 1))
+        let wordChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_"))
+
+        var start = clampedLocation
+        while start > 0 {
+            let char = UnicodeScalar(nsSource.character(at: start - 1))
+            guard let scalar = char, wordChars.contains(scalar) else { break }
+            start -= 1
+        }
+
+        var end = clampedLocation
+        while end < nsSource.length {
+            let char = UnicodeScalar(nsSource.character(at: end))
+            guard let scalar = char, wordChars.contains(scalar) else { break }
+            end += 1
+        }
+
+        let wordRange = NSRange(location: start, length: max(0, end - start))
         updateSelection(wordRange)
         return wordRange
     }
 
     public func selectLine(at location: Int) -> NSRange {
-        // Find line boundaries
-        let lineRange = NSRange(location: location, length: 0) // Placeholder
+        guard let source = sourceProvider?() else {
+            let fallback = NSRange(location: max(0, location), length: 0)
+            updateSelection(fallback)
+            return fallback
+        }
+
+        let nsSource = source as NSString
+        let clampedLocation = max(0, min(location, nsSource.length))
+
+        let lineRange = nsSource.lineRange(for: NSRange(location: clampedLocation, length: 0))
         updateSelection(lineRange)
         return lineRange
     }

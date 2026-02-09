@@ -211,8 +211,9 @@ public final class FuzzySearchEngine {
         // Bonus for consecutive matches
         score += Double(maxConsecutive) * 0.1
 
-        // Penalty for longer text
-        score *= Double(queryChars.count) / Double(textChars.count)
+        // Penalty for longer text, but softened so short fuzzy queries can still match long filenames.
+        let lengthRatio = Double(queryChars.count) / Double(max(1, textChars.count))
+        score *= sqrt(lengthRatio)
 
         // Bonus for matches at word boundaries
         for range in ranges {
@@ -248,7 +249,8 @@ public final class FuzzySearchEngine {
 
         var score = Double(matches) / Double(queryChars.count)
         score += Double(maxConsecutive) * 0.05
-        score *= Double(queryChars.count) / Double(fileNameChars.count)
+        let lengthRatio = Double(queryChars.count) / Double(max(1, fileNameChars.count))
+        score *= sqrt(lengthRatio)
 
         return min(score, 1.0)
     }

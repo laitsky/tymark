@@ -95,6 +95,9 @@ public final class TymarkTextView: NSTextView {
 
         // Initialize cursor tracker
         cursorTracker.delegate = self
+        cursorTracker.nodeProvider = { [weak self] location in
+            self?.parserState.node(at: location)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -133,6 +136,7 @@ public final class TymarkTextView: NSTextView {
     public func setSourceMode(_ enabled: Bool) {
         guard isSourceModeEnabledStorage != enabled else { return }
         isSourceModeEnabledStorage = enabled
+        nodeSyntaxVisibility.removeAll(keepingCapacity: true)
         self.renderingContext = Self.makeRenderingContext(theme: theme, zoom: zoomMultiplier, isSourceMode: enabled)
         renderDocument()
     }
@@ -180,16 +184,13 @@ public final class TymarkTextView: NSTextView {
         if pendingRender {
             pendingRender = false
             renderDocument()
+        } else if !isSourceModeEnabledStorage {
+            updateCursorProximity()
         }
     }
 
-    private func renderIncremental(at editRange: NSRange) {
-        // Parse the edit
-        let edit = TextEdit(range: editRange, replacement: "")
-        let updateInfo = parserState.applyEdit(edit, to: string)
-
-        // If it's a structural change, do a full re-render
-        if updateInfo.isStructuralChange {
+    private func renderIncremental(using updateInfo: IncrementalUpdateInfo) {
+        guard !updateInfo.isStructuralChange else {
             renderDocument()
             return
         }
@@ -197,7 +198,8 @@ public final class TymarkTextView: NSTextView {
         // Otherwise, update just the affected range
         let converter = ASTToAttributedString(context: renderingContext)
 
-        for node in updateInfo.nodesToReparse {
+        let sortedNodes = updateInfo.nodesToReparse.sorted { $0.range.location < $1.range.location }
+        for node in sortedNodes {
             let attributedNode = converter.convertNode(node, source: string)
             // Replace the range in text storage
             if NSMaxRange(node.range) <= (textStorage?.length ?? 0) {
@@ -205,6 +207,10 @@ public final class TymarkTextView: NSTextView {
                     textStorage?.replaceCharacters(in: node.range, with: attributedNode)
                 }
             }
+        }
+
+        if !isSourceModeEnabledStorage {
+            updateCursorProximity()
         }
     }
 
@@ -216,19 +222,27 @@ public final class TymarkTextView: NSTextView {
     }
 
     private func toggleSyntaxVisibility(at location: Int) {
-        // Find the node at cursor location
-        guard let node = parserState.node(at: location) else { return }
+        guard !isSourceModeEnabledStorage else { return }
 
-        // If the node is inline-rendered, toggle source mode for it
-        let needsSourceMode = shouldShowSourceMode(for: node, at: location)
+        guard let node = parserState.node(at: location) else {
+            // Cursor is outside any tracked node: hide anything currently revealed.
+            let visibleNodeIDs = nodeSyntaxVisibility.compactMap { (id, visible) in visible ? id : nil }
+            for visibleNodeID in visibleNodeIDs {
+                if let previous = parserState.document.root.node(withID: visibleNodeID) {
+                    applySyntaxVisibility(node: previous, showSource: false)
+                }
+            }
+            return
+        }
 
-        // Apply the visibility change
-        applySyntaxVisibility(node: node, showSource: needsSourceMode)
-    }
-
-    private func shouldShowSourceMode(for node: TymarkNode, at location: Int) -> Bool {
-        // Show source mode if cursor is inside the node
-        return NSLocationInRange(location, node.range)
+        // Reveal syntax for the active node and hide for all others.
+        applySyntaxVisibility(node: node, showSource: true)
+        let visibleNodeIDs = nodeSyntaxVisibility.compactMap { (id, visible) in visible ? id : nil }
+        for visibleNodeID in visibleNodeIDs where visibleNodeID != node.id {
+            if let previous = parserState.document.root.node(withID: visibleNodeID) {
+                applySyntaxVisibility(node: previous, showSource: false)
+            }
+        }
     }
 
     private func applySyntaxVisibility(node: TymarkNode, showSource: Bool) {
@@ -242,29 +256,116 @@ public final class TymarkTextView: NSTextView {
         // by updating the attributed string attributes
 
         guard let textStorage = self.textStorage else { return }
-        guard node.range.location < textStorage.length else { return }
+        let nsSource = string as NSString
+        let syntaxRanges = syntaxRanges(for: node, in: nsSource)
+        guard !syntaxRanges.isEmpty else { return }
 
-        // Get current attributes
-        let currentAttributes = textStorage.attributes(at: node.range.location, effectiveRange: nil)
-        let currentSourceMode = currentAttributes[TymarkRenderingAttribute.isSyntaxHiddenKey] as? Bool ?? false
+        let color = showSource ? renderingContext.baseColor : renderingContext.syntaxHiddenColor
 
-        // Only update if there's a change
-        if currentSourceMode != showSource {
-            performInternalUpdate {
-                textStorage.beginEditing()
-
-                // Update the node content to show/hide syntax
-                let converter = ASTToAttributedString(context: renderingContext)
-                let newAttributed = converter.convertNode(node, source: string)
-
-                // Replace the range
-                if NSMaxRange(node.range) <= textStorage.length {
-                    textStorage.replaceCharacters(in: node.range, with: newAttributed)
-                }
-
-                textStorage.endEditing()
+        performInternalUpdate {
+            textStorage.beginEditing()
+            for range in syntaxRanges {
+                guard range.location >= 0, NSMaxRange(range) <= textStorage.length else { continue }
+                textStorage.addAttribute(.foregroundColor, value: color, range: range)
+                textStorage.addAttribute(TymarkRenderingAttribute.isSyntaxHiddenKey, value: !showSource, range: range)
             }
+            textStorage.endEditing()
         }
+    }
+
+    private func syntaxRanges(for node: TymarkNode, in source: NSString) -> [NSRange] {
+        guard node.range.location >= 0, NSMaxRange(node.range) <= source.length else { return [] }
+        let raw = source.substring(with: node.range)
+        let rawLength = (raw as NSString).length
+
+        switch node.type {
+        case .heading:
+            let prefixLength = Self.headingPrefixLength(in: raw)
+            guard prefixLength > 0 else { return [] }
+            return [NSRange(location: node.range.location, length: min(prefixLength, rawLength))]
+
+        case .inlineCode:
+            let backtickCount = min(Self.leadingCharacterCount("`", in: raw), Self.trailingCharacterCount("`", in: raw))
+            guard backtickCount > 0, rawLength >= backtickCount * 2 else { return [] }
+            return [
+                NSRange(location: node.range.location, length: backtickCount),
+                NSRange(location: NSMaxRange(node.range) - backtickCount, length: backtickCount)
+            ]
+
+        case .codeBlock:
+            guard let regex = try? NSRegularExpression(pattern: "(?m)^```.*$", options: []) else {
+                return []
+            }
+            let matches = regex.matches(in: raw, range: NSRange(location: 0, length: rawLength))
+            return matches.map { match in
+                NSRange(location: node.range.location + match.range.location, length: match.range.length)
+            }
+
+        case .blockquote:
+            guard let regex = try? NSRegularExpression(pattern: "(?m)^\\s*>\\s?", options: []) else {
+                return []
+            }
+            let matches = regex.matches(in: raw, range: NSRange(location: 0, length: rawLength))
+            return matches.map { match in
+                NSRange(location: node.range.location + match.range.location, length: match.range.length)
+            }
+
+        default:
+            return []
+        }
+    }
+
+    private static func headingPrefixLength(in text: String) -> Int {
+        var index = text.startIndex
+        var hashCount = 0
+        while index < text.endIndex, text[index] == "#" {
+            hashCount += 1
+            index = text.index(after: index)
+        }
+        if index < text.endIndex, text[index] == " " {
+            return hashCount + 1
+        }
+        return hashCount
+    }
+
+    private static func leadingCharacterCount(_ character: Character, in text: String) -> Int {
+        return text.prefix { $0 == character }.count
+    }
+
+    private static func trailingCharacterCount(_ character: Character, in text: String) -> Int {
+        return text.reversed().prefix { $0 == character }.count
+    }
+
+    private func computeEdit(from oldSource: String, to newSource: String) -> TextEdit? {
+        if oldSource == newSource {
+            return nil
+        }
+
+        let oldText = oldSource as NSString
+        let newText = newSource as NSString
+        let oldLength = oldText.length
+        let newLength = newText.length
+
+        var prefix = 0
+        while prefix < oldLength && prefix < newLength &&
+                oldText.character(at: prefix) == newText.character(at: prefix) {
+            prefix += 1
+        }
+
+        var oldSuffixIndex = oldLength
+        var newSuffixIndex = newLength
+        while oldSuffixIndex > prefix &&
+                newSuffixIndex > prefix &&
+                oldText.character(at: oldSuffixIndex - 1) == newText.character(at: newSuffixIndex - 1) {
+            oldSuffixIndex -= 1
+            newSuffixIndex -= 1
+        }
+
+        let editRange = NSRange(location: prefix, length: max(0, oldSuffixIndex - prefix))
+        let replacementRange = NSRange(location: prefix, length: max(0, newSuffixIndex - prefix))
+        let replacement = newText.substring(with: replacementRange)
+
+        return TextEdit(range: editRange, replacement: replacement)
     }
 
     // MARK: - Notifications
@@ -286,11 +387,19 @@ public final class TymarkTextView: NSTextView {
             return
         }
 
-        // Update parser state
-        parserState.setSource(currentString)
+        let previousSource = parserState.document.source
+        guard let edit = computeEdit(from: previousSource, to: currentString) else {
+            parserState.setSource(currentString)
+            renderDocument()
+            return
+        }
 
-        // Re-render
-        renderDocument()
+        let updateInfo = parserState.applyEdit(edit, to: currentString)
+        if updateInfo.isStructuralChange {
+            renderDocument()
+        } else {
+            renderIncremental(using: updateInfo)
+        }
     }
 
     @objc private func selectionDidChangeNotification(_ notification: Notification) {
@@ -505,9 +614,17 @@ public final class TymarkTextView: NSTextView {
 @MainActor
 extension TymarkTextView: CursorProximityTrackerDelegate {
     public func cursorProximityTracker(_ tracker: CursorProximityTracker, didUpdateLocation location: Int) {
-        // Inline syntax hide/reveal is a follow-up feature. Keeping this callback a no-op
-        // avoids attribute churn and prevents crashes while the editor stabilizes.
-        _ = location
+        toggleSyntaxVisibility(at: location)
+    }
+
+    public func cursorProximityTracker(_ tracker: CursorProximityTracker, didEnterNode node: TymarkNode) {
+        guard !isSourceModeEnabledStorage else { return }
+        applySyntaxVisibility(node: node, showSource: true)
+    }
+
+    public func cursorProximityTracker(_ tracker: CursorProximityTracker, didExitNode node: TymarkNode) {
+        guard !isSourceModeEnabledStorage else { return }
+        applySyntaxVisibility(node: node, showSource: false)
     }
 }
 

@@ -106,7 +106,8 @@ let package = Package(
             name: "TymarkEditor",
             dependencies: [
                 "TymarkParser",
-                "TymarkTheme"
+                "TymarkTheme",
+                "TymarkExport"
             ],
             path: "Packages/TymarkEditor/Sources",
             resources: [
