@@ -87,6 +87,9 @@ let package = Package(
                 "TymarkTheme"
             ],
             path: "Packages/TymarkEditor/Sources",
+            resources: [
+                .process("../Resources")
+            ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")
             ]

@@ -1,0 +1,51 @@
+{
+    "version": 1,
+    "bindings": [
+        { "command": "file.new", "key": "cmd+n" },
+        { "command": "file.open", "key": "cmd+o" },
+        { "command": "file.save", "key": "cmd+s" },
+        { "command": "file.saveAs", "key": "cmd+shift+s" },
+        { "command": "file.close", "key": "cmd+w" },
+
+        { "command": "edit.undo", "key": "cmd+z" },
+        { "command": "edit.redo", "key": "cmd+shift+z" },
+        { "command": "edit.cut", "key": "cmd+x" },
+        { "command": "edit.copy", "key": "cmd+c" },
+        { "command": "edit.paste", "key": "cmd+v" },
+        { "command": "edit.selectAll", "key": "cmd+a" },
+
+        { "command": "view.commandPalette", "key": "cmd+shift+p" },
+        { "command": "view.quickOpen", "key": "cmd+p" },
+        { "command": "view.toggleSidebar", "key": "cmd+shift+b" },
+        { "command": "view.toggleFocusMode", "key": "cmd+shift+f" },
+        { "command": "view.toggleSourceMode", "key": "cmd+/" },
+        { "command": "view.zoomIn", "key": "cmd+=" },
+        { "command": "view.zoomOut", "key": "cmd+-" },
+        { "command": "view.resetZoom", "key": "cmd+0" },
+
+        { "command": "format.bold", "key": "cmd+b" },
+        { "command": "format.italic", "key": "cmd+i" },
+        { "command": "format.strikethrough", "key": "cmd+shift+x" },
+        { "command": "format.inlineCode", "key": "cmd+e" },
+        { "command": "format.link", "key": "cmd+k" },
+        { "command": "format.heading1", "key": "cmd+1" },
+        { "command": "format.heading2", "key": "cmd+2" },
+        { "command": "format.heading3", "key": "cmd+3" },
+        { "command": "format.heading4", "key": "cmd+4" },
+        { "command": "format.heading5", "key": "cmd+5" },
+        { "command": "format.heading6", "key": "cmd+6" },
+        { "command": "format.orderedList", "key": "cmd+shift+7" },
+        { "command": "format.unorderedList", "key": "cmd+shift+8" },
+        { "command": "format.taskList", "key": "cmd+shift+9" },
+        { "command": "format.blockquote", "key": "cmd+shift+." },
+        { "command": "format.codeBlock", "key": "cmd+shift+c" },
+        { "command": "format.horizontalRule", "key": "cmd+shift+-" },
+
+        { "command": "navigate.moveLineUp", "key": "alt+up" },
+        { "command": "navigate.moveLineDown", "key": "alt+down" },
+        { "command": "navigate.duplicateLine", "key": "cmd+shift+d" },
+
+        { "command": "export.html", "key": "cmd+shift+e" },
+        { "command": "export.pdf", "key": "cmd+alt+p" }
+    ]
+}
