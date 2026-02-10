@@ -21,6 +21,11 @@ public struct FrontMatter: Equatable, Sendable {
 // MARK: - Front Matter Parser
 
 public enum FrontMatterParser {
+    private static let closingDelimiterRegex = try? NSRegularExpression(
+        pattern: "^---\\s*$",
+        options: .anchorsMatchLines
+    )
+    private static let newlineCharacter = Character("\n").utf16.first ?? 10
 
     /// Extracts front matter from the beginning of a document.
     /// Returns the front matter and the remaining source text.
@@ -42,8 +47,7 @@ public enum FrontMatterParser {
         // Find closing ---
         let afterFirst = firstLineEnd + 1
         let searchRange = NSRange(location: afterFirst, length: nsSource.length - afterFirst)
-        let closingPattern = try? NSRegularExpression(pattern: "^---\\s*$", options: .anchorsMatchLines)
-        guard let match = closingPattern?.firstMatch(in: source, range: searchRange) else {
+        guard let match = closingDelimiterRegex?.firstMatch(in: source, range: searchRange) else {
             return (nil, source)
         }
 
@@ -59,7 +63,7 @@ public enum FrontMatterParser {
 
         // Full range including delimiters and trailing newline if present
         let endIncludingNewline: Int
-        if closingEnd < nsSource.length && nsSource.character(at: closingEnd) == UInt16(Character("\n").asciiValue!) {
+        if closingEnd < nsSource.length && nsSource.character(at: closingEnd) == newlineCharacter {
             endIncludingNewline = closingEnd + 1
         } else {
             endIncludingNewline = closingEnd

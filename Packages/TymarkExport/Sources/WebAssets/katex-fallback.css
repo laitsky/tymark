@@ -1,0 +1,9 @@
+.math-inline,
+.math-display {
+  font-family: 'Times New Roman', serif;
+}
+
+.math-display {
+  margin: 1em 0;
+  overflow-x: auto;
+}

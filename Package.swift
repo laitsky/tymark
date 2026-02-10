@@ -181,6 +181,9 @@ let package = Package(
                 "TymarkTheme"
             ],
             path: "Packages/TymarkExport/Sources",
+            resources: [
+                .process("WebAssets")
+            ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")
             ]

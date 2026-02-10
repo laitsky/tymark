@@ -12,6 +12,7 @@ public final class ThemeManager: ObservableObject {
     @Published public var currentTheme: Theme
     @Published public var availableThemes: [Theme] = []
     @Published public var customThemes: [Theme] = []
+    @Published public private(set) var lastError: ThemeManagerError?
 
     // MARK: - Singleton
 
@@ -22,25 +23,27 @@ public final class ThemeManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let customThemesDirectory: URL
     private let builtInThemes: [Theme]
+    private let fileSystem = ThemeFileSystemActor()
+
+    public var onError: ((ThemeManagerError) -> Void)?
 
     // MARK: - Initialization
 
     private init() {
         // Set up custom themes directory
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            fatalError("Unable to locate Application Support directory")
-        }
-        self.customThemesDirectory = appSupport.appendingPathComponent("Tymark/Themes", isDirectory: true)
+        self.customThemesDirectory = Self.tymarkApplicationSupportDirectory(appending: "Themes")
 
         // Load built-in themes first
         self.builtInThemes = BuiltInThemes.allThemes
         self.currentTheme = BuiltInThemes.light
 
-        // Load custom themes
-        loadCustomThemes()
-
         // Update available themes
         updateAvailableThemes()
+        restorePersistedThemeSelection()
+
+        Task { [weak self] in
+            await self?.loadCustomThemes()
+        }
 
         // Set up system appearance listener
         setupSystemAppearanceListener()
@@ -103,8 +106,7 @@ public final class ThemeManager: ObservableObject {
             editor: base.editor
         )
 
-        // Save to disk
-        saveCustomTheme(newTheme)
+        persistCustomTheme(newTheme)
 
         // Add to list
         customThemes.append(newTheme)
@@ -116,9 +118,7 @@ public final class ThemeManager: ObservableObject {
     public func deleteCustomTheme(_ theme: Theme) {
         guard !theme.isBuiltIn else { return }
 
-        // Remove from disk
-        let themeURL = customThemesDirectory.appendingPathComponent("\(theme.identifier).json")
-        try? FileManager.default.removeItem(at: themeURL)
+        deletePersistedTheme(theme)
 
         // Remove from list
         customThemes.removeAll { $0.id == theme.id }
@@ -141,42 +141,51 @@ public final class ThemeManager: ObservableObject {
             editor: theme.editor
         )
 
-        saveCustomTheme(duplicated)
+        persistCustomTheme(duplicated)
         customThemes.append(duplicated)
         updateAvailableThemes()
 
         return duplicated
     }
 
-    public func exportTheme(_ theme: Theme, to url: URL) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(theme)
-        try data.write(to: url)
+    public func exportTheme(_ theme: Theme, to url: URL) async throws {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(theme)
+            try await fileSystem.writeData(data, to: url)
+        } catch {
+            let wrapped = ThemeManagerError.failedToExportTheme(url, error)
+            reportError(wrapped)
+            throw wrapped
+        }
     }
 
-    public func importTheme(from url: URL) throws -> Theme {
-        let data = try Data(contentsOf: url)
-        let theme = try JSONDecoder().decode(Theme.self, from: data)
+    public func importTheme(from url: URL) async throws -> Theme {
+        do {
+            let data = try await fileSystem.readData(at: url)
+            let decoded = try JSONDecoder().decode(Theme.self, from: data)
 
-        // Save as custom theme
-        var importedTheme = theme
-        importedTheme = Theme(
-            id: UUID(),
-            name: theme.name,
-            identifier: "imported.\(theme.identifier)",
-            isBuiltIn: false,
-            colors: theme.colors,
-            fonts: theme.fonts,
-            spacing: theme.spacing,
-            editor: theme.editor
-        )
+            let importedTheme = Theme(
+                id: UUID(),
+                name: decoded.name,
+                identifier: "imported.\(decoded.identifier)",
+                isBuiltIn: false,
+                colors: decoded.colors,
+                fonts: decoded.fonts,
+                spacing: decoded.spacing,
+                editor: decoded.editor
+            )
 
-        saveCustomTheme(importedTheme)
-        customThemes.append(importedTheme)
-        updateAvailableThemes()
-
-        return importedTheme
+            try await saveCustomTheme(importedTheme)
+            customThemes.append(importedTheme)
+            updateAvailableThemes()
+            return importedTheme
+        } catch {
+            let wrapped = ThemeManagerError.failedToImportTheme(url, error)
+            reportError(wrapped)
+            throw wrapped
+        }
     }
 
     public func matchesSystemAppearance(_ theme: Theme) -> Bool {
@@ -195,8 +204,31 @@ public final class ThemeManager: ObservableObject {
 
     // MARK: - Private Methods
 
+    private static func tymarkApplicationSupportDirectory(appending component: String) -> URL {
+        let fileManager = FileManager.default
+        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return appSupport.appendingPathComponent("Tymark/\(component)", isDirectory: true)
+        }
+        let fallbackBase = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        return fallbackBase.appendingPathComponent("Tymark/\(component)", isDirectory: true)
+    }
+
     private func updateAvailableThemes() {
         availableThemes = builtInThemes + customThemes
+    }
+
+    private func reportError(_ error: ThemeManagerError) {
+        lastError = error
+        onError?(error)
+    }
+
+    private func restorePersistedThemeSelection() {
+        guard let identifier = UserDefaults.standard.string(forKey: "selectedThemeIdentifier"),
+              let selected = availableThemes.first(where: { $0.identifier == identifier }) else {
+            return
+        }
+        currentTheme = selected
     }
 
     private func setupSystemAppearanceListener() {
@@ -224,47 +256,61 @@ public final class ThemeManager: ObservableObject {
         }
     }
 
-    private func loadCustomThemes() {
-        // Ensure directory exists
-        try? FileManager.default.createDirectory(
-            at: customThemesDirectory,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
+    private func loadCustomThemes() async {
+        do {
+            try await fileSystem.ensureDirectoryExists(at: customThemesDirectory)
+            let themeFiles = try await fileSystem.listThemeFiles(in: customThemesDirectory)
 
-        // Load all .json files in the directory
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: customThemesDirectory,
-            includingPropertiesForKeys: nil,
-            options: .skipsHiddenFiles
-        ) else { return }
+            var loadedThemes: [Theme] = []
+            loadedThemes.reserveCapacity(themeFiles.count)
 
-        let themeFiles = files.filter { $0.pathExtension == "json" }
+            for fileURL in themeFiles {
+                do {
+                    let data = try await fileSystem.readData(at: fileURL)
+                    let theme = try JSONDecoder().decode(Theme.self, from: data)
+                    loadedThemes.append(theme)
+                } catch {
+                    reportError(.failedToLoadThemeFile(fileURL, error))
+                }
+            }
 
-        for fileURL in themeFiles {
-            if let data = try? Data(contentsOf: fileURL),
-               let theme = try? JSONDecoder().decode(Theme.self, from: data) {
-                customThemes.append(theme)
+            customThemes = loadedThemes
+            updateAvailableThemes()
+            restorePersistedThemeSelection()
+        } catch {
+            reportError(.failedToLoadThemesDirectory(customThemesDirectory, error))
+        }
+    }
+
+    private func persistCustomTheme(_ theme: Theme) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await saveCustomTheme(theme)
+            } catch {
+                reportError(.failedToSaveTheme(theme.identifier, error))
             }
         }
     }
 
-    private func saveCustomTheme(_ theme: Theme) {
-        try? FileManager.default.createDirectory(
-            at: customThemesDirectory,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
-
+    private func saveCustomTheme(_ theme: Theme) async throws {
+        try await fileSystem.ensureDirectoryExists(at: customThemesDirectory)
         let themeURL = customThemesDirectory.appendingPathComponent("\(theme.identifier).json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(theme)
+        try await fileSystem.writeData(data, to: themeURL)
+    }
 
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(theme)
-            try data.write(to: themeURL)
-        } catch {
-            print("Failed to save theme: \(error)")
+    private func deletePersistedTheme(_ theme: Theme) {
+        Task { [weak self] in
+            guard let self else { return }
+            let themeURL = customThemesDirectory.appendingPathComponent("\(theme.identifier).json")
+            do {
+                try await fileSystem.removeItemIfExists(at: themeURL)
+            } catch {
+                reportError(.failedToDeleteTheme(theme.identifier, error))
+            }
         }
     }
 }

@@ -1,10 +1,9 @@
 import Foundation
 import AppKit
-import Combine
 
 // MARK: - Workspace
 
-public struct Workspace: Identifiable, Equatable, Codable {
+public struct Workspace: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public var name: String
     public var rootURL: URL?
@@ -34,7 +33,7 @@ public struct Workspace: Identifiable, Equatable, Codable {
 
 // MARK: - Workspace File
 
-public struct WorkspaceFile: Identifiable, Equatable, Codable {
+public struct WorkspaceFile: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public var url: URL
     public var name: String
@@ -92,12 +91,14 @@ public final class WorkspaceManager: ObservableObject {
     @Published public var workspaces: [Workspace] = []
     @Published public var currentWorkspace: Workspace?
     @Published public var selectedFiles: [WorkspaceFile] = []
+    @Published public private(set) var lastError: WorkspaceManagerError?
 
     // MARK: - Private Properties
 
     private var fileMonitor: FileMonitor?
-    private var cancellables = Set<AnyCancellable>()
+    private var saveTask: Task<Void, Never>?
     private let workspacesDirectory: URL
+    private let fileSystem = WorkspaceFileSystemActor()
 
     // MARK: - Callbacks
 
@@ -105,17 +106,21 @@ public final class WorkspaceManager: ObservableObject {
     public var onFileOpen: ((WorkspaceFile) -> Void)?
     public var onFileCreate: ((URL) -> Void)?
     public var onFileDelete: ((URL) -> Void)?
+    public var onError: ((WorkspaceManagerError) -> Void)?
 
     // MARK: - Initialization
 
     public init() {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            fatalError("Unable to locate Application Support directory")
-        }
-        self.workspacesDirectory = appSupport.appendingPathComponent("Tymark/Workspaces", isDirectory: true)
+        self.workspacesDirectory = Self.tymarkApplicationSupportDirectory(appending: "Workspaces")
 
-        loadWorkspaces()
-        setupFileMonitoring()
+        Task { [weak self] in
+            await self?.loadWorkspaces()
+            self?.setupFileMonitoring()
+        }
+    }
+
+    deinit {
+        saveTask?.cancel()
     }
 
     // MARK: - Public API
@@ -172,25 +177,34 @@ public final class WorkspaceManager: ObservableObject {
     }
 
     public func refreshFileTree(for workspaceID: UUID, rootURL: URL) {
-        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+        guard workspaces.contains(where: { $0.id == workspaceID }) else { return }
 
-        let fileTree = buildFileTree(from: rootURL)
-        workspaces[index].openFiles = fileTree
-        if currentWorkspace?.id == workspaceID {
-            currentWorkspace = workspaces[index]
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let fileTree = try await fileSystem.loadDirectoryContents(at: rootURL)
+                guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+                workspaces[index].openFiles = fileTree
+                if currentWorkspace?.id == workspaceID {
+                    currentWorkspace = workspaces[index]
+                }
+            } catch {
+                reportError(.failedToEnumerateDirectory(rootURL, error))
+            }
         }
     }
 
     public func expandDirectory(_ fileID: UUID, in workspaceID: UUID) {
         guard let workspaceIndex = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
 
+        var directoryToLoad: URL?
+
         func updateFileTree(_ files: inout [WorkspaceFile]) -> Bool {
             for i in files.indices {
                 if files[i].id == fileID {
                     files[i].isExpanded.toggle()
                     if files[i].isExpanded && files[i].children.isEmpty {
-                        // Load children
-                        files[i].children = loadDirectoryContents(url: files[i].url)
+                        directoryToLoad = files[i].url
                     }
                     return true
                 }
@@ -204,6 +218,17 @@ public final class WorkspaceManager: ObservableObject {
         _ = updateFileTree(&workspaces[workspaceIndex].openFiles)
         if currentWorkspace?.id == workspaceID {
             currentWorkspace = workspaces[workspaceIndex]
+        }
+
+        guard let url = directoryToLoad else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let children = try await fileSystem.loadDirectoryContents(at: url)
+                applyLoadedChildren(children, forDirectoryID: fileID, in: workspaceID)
+            } catch {
+                reportError(.failedToEnumerateDirectory(url, error))
+            }
         }
     }
 
@@ -245,138 +270,125 @@ public final class WorkspaceManager: ObservableObject {
         onFileOpen?(file)
     }
 
-    public func createNewFile(in directory: URL, name: String) -> URL? {
+    public func createNewFile(in directory: URL, name: String) async -> URL? {
         let fileURL = directory.appendingPathComponent(name)
 
         do {
-            // Create empty file
-            try "".write(to: fileURL, atomically: true, encoding: .utf8)
+            try await fileSystem.createEmptyFile(at: fileURL)
             onFileCreate?(fileURL)
             return fileURL
         } catch {
-            print("Failed to create file: \(error)")
+            reportError(.failedToCreateFile(fileURL, error))
             return nil
         }
     }
 
-    public func createNewDirectory(in directory: URL, name: String) -> URL? {
+    public func createNewDirectory(in directory: URL, name: String) async -> URL? {
         let dirURL = directory.appendingPathComponent(name, isDirectory: true)
 
         do {
-            try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: false)
+            try await fileSystem.createDirectory(at: dirURL)
             onFileCreate?(dirURL)
             return dirURL
         } catch {
-            print("Failed to create directory: \(error)")
+            reportError(.failedToCreateDirectory(dirURL, error))
             return nil
         }
     }
 
-    public func deleteFile(_ file: WorkspaceFile) -> Bool {
+    public func deleteFile(_ file: WorkspaceFile) async -> Bool {
         // Validate file is within workspace root
         if let workspace = currentWorkspace,
            let root = workspace.rootURL {
             guard file.url.path.hasPrefix(root.path) else {
-                print("Cannot delete file outside workspace: \(file.url.path)")
+                reportError(.failedToDeleteFile(
+                    file.url,
+                    NSError(
+                        domain: "WorkspaceManager",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Cannot delete file outside workspace root"]
+                    )
+                ))
                 return false
             }
         }
 
         do {
             // Move to trash instead of permanent deletion
-            try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
+            try await fileSystem.trashItem(at: file.url)
             onFileDelete?(file.url)
             return true
         } catch {
-            print("Failed to delete file: \(error)")
+            reportError(.failedToDeleteFile(file.url, error))
             return false
         }
     }
 
-    public func renameFile(_ file: WorkspaceFile, to newName: String) -> URL? {
+    public func renameFile(_ file: WorkspaceFile, to newName: String) async -> URL? {
         let newURL = file.url.deletingLastPathComponent().appendingPathComponent(newName)
 
         do {
-            try FileManager.default.moveItem(at: file.url, to: newURL)
+            try await fileSystem.moveItem(at: file.url, to: newURL)
             return newURL
         } catch {
-            print("Failed to rename file: \(error)")
+            reportError(.failedToRenameFile(file.url, error))
             return nil
         }
     }
 
-    public func duplicateFile(_ file: WorkspaceFile) -> URL? {
+    public func duplicateFile(_ file: WorkspaceFile) async -> URL? {
         let baseName = file.url.deletingPathExtension().lastPathComponent
         let ext = file.url.pathExtension
         let newName = "\(baseName) Copy\(ext.isEmpty ? "" : ".\(ext)")"
         let newURL = file.url.deletingLastPathComponent().appendingPathComponent(newName)
 
         do {
-            try FileManager.default.copyItem(at: file.url, to: newURL)
+            try await fileSystem.copyItem(at: file.url, to: newURL)
             onFileCreate?(newURL)
             return newURL
         } catch {
-            print("Failed to duplicate file: \(error)")
+            reportError(.failedToDuplicateFile(file.url, error))
             return nil
         }
     }
 
     // MARK: - Private Methods
 
-    private func buildFileTree(from url: URL, depth: Int = 0) -> [WorkspaceFile] {
-        guard depth < 10 else { return [] } // Prevent deep recursion
-
-        let resourceKeys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey, .isHiddenKey]
-        let options: FileManager.DirectoryEnumerationOptions = [.skipsHiddenFiles, .skipsPackageDescendants]
-
-        guard let enumerator = FileManager.default.enumerator(
-            at: url,
-            includingPropertiesForKeys: resourceKeys,
-            options: options,
-            errorHandler: nil
-        ) else {
-            return []
+    private static func tymarkApplicationSupportDirectory(appending component: String) -> URL {
+        let fileManager = FileManager.default
+        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return appSupport.appendingPathComponent("Tymark/\(component)", isDirectory: true)
         }
-
-        var files: [WorkspaceFile] = []
-
-        for case let fileURL as URL in enumerator {
-            guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(resourceKeys)) else { continue }
-
-            let isDirectory = resourceValues.isDirectory ?? false
-            let isHidden = resourceValues.isHidden ?? false
-
-            if isHidden { continue }
-
-            let file = WorkspaceFile(
-                url: fileURL,
-                isDirectory: isDirectory,
-                isExpanded: false,
-                children: [],
-                isSelected: false,
-                isOpen: false,
-                modificationDate: resourceValues.contentModificationDate,
-                fileSize: resourceValues.fileSize.map(Int64.init)
-            )
-
-            files.append(file)
-
-            // Don't descend into directories at this level
-            if isDirectory {
-                enumerator.skipDescendants()
-            }
-        }
-
-        return files.sorted { file1, file2 in
-            if file1.isDirectory != file2.isDirectory {
-                return file1.isDirectory // Directories first
-            }
-            return file1.name.localizedCaseInsensitiveCompare(file2.name) == .orderedAscending
-        }
+        let fallbackBase = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        return fallbackBase.appendingPathComponent("Tymark/\(component)", isDirectory: true)
     }
 
-    private func loadDirectoryContents(url: URL) -> [WorkspaceFile] {
-        return buildFileTree(from: url, depth: 0)
+    private func reportError(_ error: WorkspaceManagerError) {
+        lastError = error
+        onError?(error)
+    }
+
+    private func applyLoadedChildren(_ children: [WorkspaceFile], forDirectoryID fileID: UUID, in workspaceID: UUID) {
+        guard let workspaceIndex = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+
+        func apply(_ files: inout [WorkspaceFile]) -> Bool {
+            for index in files.indices {
+                if files[index].id == fileID {
+                    files[index].children = children
+                    return true
+                }
+                if apply(&files[index].children) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        _ = apply(&workspaces[workspaceIndex].openFiles)
+        if currentWorkspace?.id == workspaceID {
+            currentWorkspace = workspaces[workspaceIndex]
+        }
     }
 
     private func updateFileSelection(fileID: UUID, isSelected: Bool) {
@@ -425,34 +437,42 @@ public final class WorkspaceManager: ObservableObject {
         }
     }
 
-    private func loadWorkspaces() {
-        try? FileManager.default.createDirectory(
-            at: workspacesDirectory,
-            withIntermediateDirectories: true
-        )
-
+    private func loadWorkspaces() async {
         let workspaceFile = workspacesDirectory.appendingPathComponent("workspaces.json")
-
-        guard let data = try? Data(contentsOf: workspaceFile),
-              let loadedWorkspaces = try? JSONDecoder().decode([Workspace].self, from: data) else {
-            return
+        do {
+            try await fileSystem.ensureDirectoryExists(at: workspacesDirectory)
+            workspaces = try await fileSystem.loadWorkspaces(from: workspaceFile)
+        } catch {
+            reportError(.failedToLoadWorkspaces(workspaceFile, error))
+            workspaces = []
         }
 
-        workspaces = loadedWorkspaces
-
-        // Restore current workspace
+        // Restore current workspace from persisted ID.
         if let savedID = UserDefaults.standard.string(forKey: "currentWorkspaceID"),
            let uuid = UUID(uuidString: savedID),
            let workspace = workspaces.first(where: { $0.id == uuid }) {
             currentWorkspace = workspace
+        } else {
+            currentWorkspace = workspaces.first
         }
     }
 
     private func saveWorkspaces() {
         let workspaceFile = workspacesDirectory.appendingPathComponent("workspaces.json")
-
-        if let data = try? JSONEncoder().encode(workspaces) {
-            try? data.write(to: workspaceFile)
+        let snapshot = workspaces
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try Task.checkCancellation()
+                try await fileSystem.ensureDirectoryExists(at: workspacesDirectory)
+                try Task.checkCancellation()
+                try await fileSystem.saveWorkspaces(snapshot, to: workspaceFile)
+            } catch is CancellationError {
+                return
+            } catch {
+                reportError(.failedToSaveWorkspaces(workspaceFile, error))
+            }
         }
 
         // Save current workspace ID

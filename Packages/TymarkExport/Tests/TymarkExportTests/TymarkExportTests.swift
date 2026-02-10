@@ -76,6 +76,29 @@ final class TymarkExportTests: XCTestCase {
         XCTAssertTrue(html!.contains("</style>"), "HTML output should contain closing style tag")
     }
 
+    func testHTMLExporterUsesOfflineAssetsWithoutCDNReferences() {
+        let html = exportHTML("# Hello")
+        XCTAssertNotNil(html)
+        XCTAssertFalse(html!.contains("cdn.jsdelivr.net"), "HTML output should not depend on CDN assets")
+        XCTAssertFalse(html!.contains("unpkg.com"), "HTML output should not depend on CDN assets")
+    }
+
+    func testHTMLExporterIncludesMermaidOfflineBootstrapScript() {
+        let html = exportHTML("```mermaid\ngraph TD\nA-->B\n```")
+        XCTAssertNotNil(html)
+        XCTAssertTrue(html!.contains("data-renderer"), "HTML output should include offline mermaid bootstrap logic")
+        XCTAssertTrue(
+            html!.contains("Mermaid rendering library is not embedded"),
+            "HTML output should explain offline mermaid behavior"
+        )
+    }
+
+    func testHTMLExporterIncludesLocalMathFallbackStyles() {
+        let html = exportHTML("$x + y$")
+        XCTAssertNotNil(html)
+        XCTAssertTrue(html!.contains(".math-inline"), "HTML output should include local math fallback CSS")
+    }
+
     // MARK: - HTMLExporter: Theme CSS
 
     func testHTMLExporterIncludesTextColorFromTheme() {

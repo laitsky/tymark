@@ -1,0 +1,11 @@
+--swiftversion 5.9
+--indent 4
+--linebreaks lf
+--maxwidth 140
+--trimwhitespace always
+--commas inline
+--elseposition same-line
+--self remove
+--semicolons never
+--header ignore
+--disable redundantFileprivate,unusedArguments,blankLinesAtEndOfScope

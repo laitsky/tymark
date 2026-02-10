@@ -33,6 +33,12 @@ public struct ParserConfiguration: Sendable {
 
 public final class MarkdownParser: @unchecked Sendable {
     private let configuration: ParserConfiguration
+    private enum RegexCache {
+        static let callout = try? NSRegularExpression(pattern: #"(?im)^\s*>\s*\[!([A-Za-z]+)\]\s*(.*)$"#)
+        static let wikilink = try? NSRegularExpression(pattern: #"(!)?\[\[([^\]\n]+)\]\]"#)
+        static let blockMath = try? NSRegularExpression(pattern: "\\$\\$([\\s\\S]*?)\\$\\$")
+        static let inlineMath = try? NSRegularExpression(pattern: "(?<!\\$)\\$(?!\\$)([^$\\n]+?)(?<!\\$)\\$(?!\\$)")
+    }
 
     public init(configuration: ParserConfiguration = .default) {
         self.configuration = configuration
@@ -43,7 +49,7 @@ public final class MarkdownParser: @unchecked Sendable {
     public func parse(_ source: String) -> TymarkDocument {
         // Phase 7: Extract front matter before parsing
         let (frontMatter, strippedSource) = FrontMatterParser.extract(from: source)
-        let frontMatterOffset = frontMatter != nil ? NSMaxRange(frontMatter!.range) : 0
+        let frontMatterOffset = frontMatter.map { NSMaxRange($0.range) } ?? 0
 
         let markdownDocument = Document(parsing: strippedSource)
         var root = convertNode(
@@ -151,8 +157,7 @@ public final class MarkdownParser: @unchecked Sendable {
 
     private func parseCalloutHeader(from blockquoteText: String) -> (kind: String, title: String)? {
         let nsText = blockquoteText as NSString
-        let pattern = #"(?im)^\s*>\s*\[!([A-Za-z]+)\]\s*(.*)$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        guard let regex = RegexCache.callout else { return nil }
         let range = NSRange(location: 0, length: nsText.length)
         guard let match = regex.firstMatch(in: blockquoteText, range: range) else { return nil }
 
@@ -206,8 +211,7 @@ public final class MarkdownParser: @unchecked Sendable {
         let nsText = textNode.content as NSString
         guard nsText.length > 0 else { return [textNode] }
 
-        let pattern = #"(!)?\[\[([^\]\n]+)\]\]"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [textNode] }
+        guard let regex = RegexCache.wikilink else { return [textNode] }
         let fullRange = NSRange(location: 0, length: nsText.length)
         let matches = regex.matches(in: textNode.content, range: fullRange)
         guard !matches.isEmpty else { return [textNode] }
@@ -307,8 +311,10 @@ public final class MarkdownParser: @unchecked Sendable {
         }
 
         // Block math: $$...$$
-        let blockMathPattern = try? NSRegularExpression(pattern: "\\$\\$([\\s\\S]*?)\\$\\$", options: [])
-        let blockMatches = blockMathPattern?.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) ?? []
+        let blockMatches = RegexCache.blockMath?.matches(
+            in: source,
+            range: NSRange(location: 0, length: nsSource.length)
+        ) ?? []
 
         var mathNodes: [TymarkNode] = []
         for match in blockMatches {
@@ -328,8 +334,10 @@ public final class MarkdownParser: @unchecked Sendable {
         }
 
         // Inline math: $...$  (single dollar, not preceded/followed by another $)
-        let inlineMathPattern = try? NSRegularExpression(pattern: "(?<!\\$)\\$(?!\\$)([^$\\n]+?)(?<!\\$)\\$(?!\\$)", options: [])
-        let inlineMatches = inlineMathPattern?.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) ?? []
+        let inlineMatches = RegexCache.inlineMath?.matches(
+            in: source,
+            range: NSRange(location: 0, length: nsSource.length)
+        ) ?? []
 
         for match in inlineMatches {
             let fullRange = match.range

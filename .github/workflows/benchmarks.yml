@@ -1,0 +1,20 @@
+name: Benchmarks
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+jobs:
+  performance:
+    runs-on: macos-14
+    env:
+      TYMARK_RUN_PERF_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parser benchmarks
+        run: swift test --filter PerformanceBenchmarkTests
+      - name: Preview benchmarks
+        run: swift test --filter PreviewPerformanceBenchmarkTests
+      - name: Editor benchmarks
+        run: swift test --filter EditorPerformanceBenchmarkTests

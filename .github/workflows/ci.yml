@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & Test
+        run: swift test
+
+  quality:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install linters
+        run: brew install swiftformat swiftlint
+      - name: Check Swift formatting
+        run: swiftformat --lint App Packages Package.swift --config .swiftformat
+      - name: Run SwiftLint
+        run: swiftlint lint --config .swiftlint.yml

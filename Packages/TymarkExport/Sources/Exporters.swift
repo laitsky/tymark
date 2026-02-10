@@ -30,20 +30,17 @@ public final class HTMLExporter: Exporter {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Tymark Export</title>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
-        <script type="module">
-            import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-            mermaid.initialize({ startOnLoad: true, theme: 'default' });
-        </script>
         <style>
         \(generateCSS(theme: theme))
+        \(localMathStyles())
         .footnotes { border-top: 1px solid \(theme.colors.quoteBorder.hexString); margin-top: 2em; padding-top: 1em; font-size: 0.9em; }
         .footnotes ol { padding-left: 1.5em; }
         .footnote-ref { vertical-align: super; font-size: 0.75em; }
         .front-matter { background: \(theme.colors.codeBackground.hexString); padding: 12px; border-radius: 4px; margin-bottom: 1em; font-family: monospace; font-size: 0.9em; color: \(theme.colors.secondaryText.hexString); }
         </style>
+        <script>
+        \(localMermaidBootstrapScript())
+        </script>
         </head>
         <body>
         <article class="markdown-body">
@@ -57,7 +54,7 @@ public final class HTMLExporter: Exporter {
     }
 
     private func generateCSS(theme: Theme) -> String {
-        // Phase 7: Include KaTeX CSS and Mermaid JS in head
+        // Core document styles for standalone export.
         """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -119,6 +116,28 @@ public final class HTMLExporter: Exporter {
         th { font-weight: 600; background: \(theme.colors.codeBackground.hexString); }
         img { max-width: 100%; height: auto; border-radius: 4px; }
         del { text-decoration: line-through; opacity: 0.7; }
+        """
+    }
+
+    private func localMathStyles() -> String {
+        if let bundled = ExportWebAssets.katexFallbackCSS, !bundled.isEmpty {
+            return bundled
+        }
+        return """
+        .math-inline { font-family: '\(SyntaxFontFallback.math)', serif; }
+        .math-display { font-family: '\(SyntaxFontFallback.math)', serif; margin: 1em 0; overflow-x: auto; }
+        """
+    }
+
+    private func localMermaidBootstrapScript() -> String {
+        if let bundled = ExportWebAssets.mermaidBootstrapScript, !bundled.isEmpty {
+            return bundled
+        }
+        return """
+        document.querySelectorAll('pre.mermaid').forEach(function(node) {
+          node.setAttribute('data-renderer', 'offline');
+          node.setAttribute('title', 'Mermaid rendering library is not embedded; raw diagram source is shown.');
+        });
         """
     }
 
@@ -372,6 +391,22 @@ public final class HTMLExporter: Exporter {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+}
+
+private enum SyntaxFontFallback {
+    static let math = "Times New Roman"
+}
+
+private enum ExportWebAssets {
+    static let katexFallbackCSS = loadTextAsset(named: "katex-fallback", extension: "css")
+    static let mermaidBootstrapScript = loadTextAsset(named: "mermaid-bootstrap", extension: "js")
+
+    private static func loadTextAsset(named name: String, extension ext: String) -> String? {
+        guard let url = Bundle.module.url(forResource: name, withExtension: ext) else {
+            return nil
+        }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 }
 

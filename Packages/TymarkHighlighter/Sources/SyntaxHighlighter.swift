@@ -15,7 +15,15 @@ public final class SyntaxHighlighter: SyntaxHighlighterProtocol {
 
     // MARK: - Properties
 
-    private var languageDefinitions: [String: LanguageDefinition] = [:]
+    private struct CompiledLanguageDefinition {
+        let keywordRegex: NSRegularExpression?
+        let typeRegex: NSRegularExpression?
+        let stringRegex: NSRegularExpression?
+        let commentRegex: NSRegularExpression?
+        let numberRegex: NSRegularExpression?
+    }
+
+    private var languageDefinitions: [String: CompiledLanguageDefinition] = [:]
     private var theme: SyntaxTheme
 
     // MARK: - Initialization
@@ -53,7 +61,7 @@ public final class SyntaxHighlighter: SyntaxHighlighterProtocol {
     }
 
     public func registerLanguage(_ language: String, definition: LanguageDefinition) {
-        languageDefinitions[language.lowercased()] = definition
+        languageDefinitions[language.lowercased()] = compile(definition)
     }
 
     // MARK: - Private Methods
@@ -207,7 +215,7 @@ public final class SyntaxHighlighter: SyntaxHighlighterProtocol {
         ))
 
         // Shell/Bash
-        registerLanguage("bash", definition: LanguageDefinition(
+        let bashDefinition = LanguageDefinition(
             name: "Bash",
             keywords: [
                 "if", "then", "else", "elif", "fi", "case", "esac", "for",
@@ -227,13 +235,74 @@ public final class SyntaxHighlighter: SyntaxHighlighterProtocol {
             stringDelimiter: "\"",
             escapeCharacter: "\\",
             numberPattern: "^\\d+$"
-        ))
-
-        registerLanguage("sh", definition: languageDefinitions["bash"]!)
-        registerLanguage("zsh", definition: languageDefinitions["bash"]!)
+        )
+        registerLanguage("bash", definition: bashDefinition)
+        registerLanguage("sh", definition: bashDefinition)
+        registerLanguage("zsh", definition: bashDefinition)
     }
 
-    private func highlightWithDefinition(_ code: String, definition: LanguageDefinition) -> NSAttributedString {
+    private func compile(_ definition: LanguageDefinition) -> CompiledLanguageDefinition {
+        let keywordRegex: NSRegularExpression?
+        if definition.keywords.isEmpty {
+            keywordRegex = nil
+        } else {
+            let keywordPattern = definition.keywords
+                .map(NSRegularExpression.escapedPattern(for:))
+                .joined(separator: "|")
+            keywordRegex = try? NSRegularExpression(pattern: "\\b(\(keywordPattern))\\b")
+        }
+
+        let typeRegex: NSRegularExpression?
+        if definition.types.isEmpty {
+            typeRegex = nil
+        } else {
+            let typePattern = definition.types
+                .map(NSRegularExpression.escapedPattern(for:))
+                .joined(separator: "|")
+            typeRegex = try? NSRegularExpression(pattern: "\\b(\(typePattern))\\b")
+        }
+
+        let stringRegex: NSRegularExpression?
+        if definition.stringDelimiter.isEmpty {
+            stringRegex = nil
+        } else {
+            let escapedDelimiter = NSRegularExpression.escapedPattern(for: definition.stringDelimiter)
+            let stringPattern = "\(escapedDelimiter)[^\(escapedDelimiter)]*\(escapedDelimiter)"
+            stringRegex = try? NSRegularExpression(pattern: stringPattern)
+        }
+
+        let commentRegex: NSRegularExpression?
+        if definition.commentPrefix.isEmpty {
+            commentRegex = nil
+        } else {
+            let escapedPrefix = NSRegularExpression.escapedPattern(for: definition.commentPrefix)
+            commentRegex = try? NSRegularExpression(pattern: "\(escapedPrefix).*")
+        }
+
+        let numberRegex: NSRegularExpression?
+        if definition.numberPattern.isEmpty {
+            numberRegex = nil
+        } else {
+            var tokenPattern = definition.numberPattern
+            if tokenPattern.hasPrefix("^") {
+                tokenPattern.removeFirst()
+            }
+            if tokenPattern.hasSuffix("$") {
+                tokenPattern.removeLast()
+            }
+            numberRegex = try? NSRegularExpression(pattern: "(?<!\\w)(\(tokenPattern))(?!\\w)")
+        }
+
+        return CompiledLanguageDefinition(
+            keywordRegex: keywordRegex,
+            typeRegex: typeRegex,
+            stringRegex: stringRegex,
+            commentRegex: commentRegex,
+            numberRegex: numberRegex
+        )
+    }
+
+    private func highlightWithDefinition(_ code: String, definition: CompiledLanguageDefinition) -> NSAttributedString {
         let attributedString = NSMutableAttributedString(string: code, attributes: [
             .font: theme.font,
             .foregroundColor: theme.textColor
@@ -245,59 +314,26 @@ public final class SyntaxHighlighter: SyntaxHighlighterProtocol {
         let nsString = code as NSString
         let fullRange = NSRange(location: 0, length: nsString.length)
 
-        // Keywords
-        let keywordPattern = definition.keywords.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
-        if let keywordRegex = try? NSRegularExpression(pattern: "\\b(\(keywordPattern))\\b", options: []) {
-            keywordRegex.enumerateMatches(in: code, options: [], range: fullRange) { match, _, _ in
-                guard let range = match?.range else { return }
-                attributedString.addAttribute(.foregroundColor, value: theme.keywordColor, range: range)
-            }
-        }
-
-        // Types
-        let typePattern = definition.types.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
-        if !typePattern.isEmpty,
-           let typeRegex = try? NSRegularExpression(pattern: "\\b(\(typePattern))\\b", options: []) {
-            typeRegex.enumerateMatches(in: code, options: [], range: fullRange) { match, _, _ in
-                guard let range = match?.range else { return }
-                attributedString.addAttribute(.foregroundColor, value: theme.typeColor, range: range)
-            }
-        }
-
-        // Strings
-        if !definition.stringDelimiter.isEmpty {
-            let escapedDelimiter = NSRegularExpression.escapedPattern(for: definition.stringDelimiter)
-            let stringPattern = "\(escapedDelimiter)[^\(escapedDelimiter)]*\(escapedDelimiter)"
-            if let stringRegex = try? NSRegularExpression(pattern: stringPattern, options: []) {
-                stringRegex.enumerateMatches(in: code, options: [], range: fullRange) { match, _, _ in
-                    guard let range = match?.range else { return }
-                    attributedString.addAttribute(.foregroundColor, value: theme.stringColor, range: range)
-                }
-            }
-        }
-
-        // Comments
-        if !definition.commentPrefix.isEmpty {
-            let escapedPrefix = NSRegularExpression.escapedPattern(for: definition.commentPrefix)
-            let commentPattern = "\(escapedPrefix).*"
-            if let commentRegex = try? NSRegularExpression(pattern: commentPattern, options: []) {
-                commentRegex.enumerateMatches(in: code, options: [], range: fullRange) { match, _, _ in
-                    guard let range = match?.range else { return }
-                    attributedString.addAttribute(.foregroundColor, value: theme.commentColor, range: range)
-                }
-            }
-        }
-
-        // Numbers
-        if !definition.numberPattern.isEmpty,
-           let numberRegex = try? NSRegularExpression(pattern: definition.numberPattern, options: []) {
-            numberRegex.enumerateMatches(in: code, options: [], range: fullRange) { match, _, _ in
-                guard let range = match?.range else { return }
-                attributedString.addAttribute(.foregroundColor, value: theme.numberColor, range: range)
-            }
-        }
+        applyColor(theme.keywordColor, using: definition.keywordRegex, in: code, fullRange: fullRange, target: attributedString)
+        applyColor(theme.typeColor, using: definition.typeRegex, in: code, fullRange: fullRange, target: attributedString)
+        applyColor(theme.stringColor, using: definition.stringRegex, in: code, fullRange: fullRange, target: attributedString)
+        applyColor(theme.commentColor, using: definition.commentRegex, in: code, fullRange: fullRange, target: attributedString)
+        applyColor(theme.numberColor, using: definition.numberRegex, in: code, fullRange: fullRange, target: attributedString)
 
         return attributedString
+    }
+
+    private func applyColor(
+        _ color: NSColor,
+        using regex: NSRegularExpression?,
+        in code: String,
+        fullRange: NSRange,
+        target: NSMutableAttributedString
+    ) {
+        regex?.enumerateMatches(in: code, options: [], range: fullRange) { match, _, _ in
+            guard let range = match?.range else { return }
+            target.addAttribute(.foregroundColor, value: color, range: range)
+        }
     }
 }
 

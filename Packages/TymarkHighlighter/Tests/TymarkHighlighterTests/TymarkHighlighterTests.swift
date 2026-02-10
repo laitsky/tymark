@@ -273,6 +273,26 @@ final class SyntaxHighlighterTests: XCTestCase {
         XCTAssertEqual(color, SyntaxTheme.default.stringColor, "String literals should be highlighted with the string color")
     }
 
+    func testHighlightSwiftNumberLiteralHasNumberColor() {
+        let highlighter = SyntaxHighlighter()
+        let code = "let x = 42"
+        let result = highlighter.highlight(code, language: "swift")
+        let numberRange = (code as NSString).range(of: "42")
+        XCTAssertNotEqual(numberRange.location, NSNotFound)
+        let attributes = result.attributes(at: numberRange.location, effectiveRange: nil)
+        let color = attributes[.foregroundColor] as? NSColor
+        XCTAssertEqual(color, SyntaxTheme.default.numberColor, "Numeric literals should be highlighted with the number color")
+    }
+
+    func testHighlightLanguageWithNoKeywordsKeepsDefaultTextColor() {
+        let highlighter = SyntaxHighlighter()
+        let code = "plain markdown text"
+        let result = highlighter.highlight(code, language: "markdown")
+        let attributes = result.attributes(at: 0, effectiveRange: nil)
+        let color = attributes[.foregroundColor] as? NSColor
+        XCTAssertEqual(color, SyntaxTheme.default.textColor, "Languages with no keywords should not tint plain text as keywords")
+    }
+
     func testHighlightEmptyStringReturnsEmptyAttributedString() {
         let highlighter = SyntaxHighlighter()
         let result = highlighter.highlight("", language: "swift")
@@ -380,6 +400,31 @@ final class SyntaxHighlighterTests: XCTestCase {
         let attributes = result.attributes(at: 0, effectiveRange: nil)
         let color = attributes[.foregroundColor] as? NSColor
         XCTAssertEqual(color, SyntaxTheme.default.keywordColor, "Registered language keywords should be highlighted")
+    }
+
+    func testRegisterLanguageAnchoredNumberPatternHighlightsInlineNumber() {
+        let highlighter = SyntaxHighlighter()
+        let customDef = LanguageDefinition(
+            name: "AnchoredNumbers",
+            keywords: [],
+            types: [],
+            operators: [],
+            commentPrefix: "",
+            multilineCommentStart: "",
+            multilineCommentEnd: "",
+            stringDelimiter: "",
+            escapeCharacter: "",
+            numberPattern: "^\\d+$"
+        )
+        highlighter.registerLanguage("anchored-numbers", definition: customDef)
+
+        let code = "value 99"
+        let result = highlighter.highlight(code, language: "anchored-numbers")
+        let numberRange = (code as NSString).range(of: "99")
+        XCTAssertNotEqual(numberRange.location, NSNotFound)
+        let attributes = result.attributes(at: numberRange.location, effectiveRange: nil)
+        let color = attributes[.foregroundColor] as? NSColor
+        XCTAssertEqual(color, SyntaxTheme.default.numberColor)
     }
 
     // MARK: - setTheme
