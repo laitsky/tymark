@@ -393,6 +393,21 @@ public final class DOCXExporter: Exporter {
             </w:hyperlink>
             """
 
+        case .wikilink(let target, _):
+            let linkColor = colorToHex(theme.colors.link)
+            let rId = registerHyperlink(url: target + ".md")
+            return """
+            <w:hyperlink r:id="\(rId)">
+                <w:r>
+                    <w:rPr>
+                        <w:color w:val="\(linkColor)"/>
+                        <w:u w:val="single"/>
+                    </w:rPr>
+                    <w:t xml:space="preserve">\(escapeXML(target))</w:t>
+                </w:r>
+            </w:hyperlink>
+            """
+
         case .image(_, let alt):
             return textRun(escapeXML("[\(alt ?? "image")]"), italic: true)
 

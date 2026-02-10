@@ -100,10 +100,16 @@ public final class MarkdownParser: @unchecked Sendable {
         // 2. Reclassify ```mermaid code blocks as .mermaid nodes
         children = children.map { reclassifyMermaidBlocks($0) }
 
-        // 3. Inject math nodes ($$...$$ block and $...$ inline)
+        // 3. Mark callout blockquotes (> [!NOTE], > [!WARNING], etc.)
+        children = children.map { annotateCalloutBlocks($0) }
+
+        // 4. Inject wikilinks ([[page]] and ![[embed]])
+        children = injectWikilinks(in: children)
+
+        // 5. Inject math nodes ($$...$$ block and $...$ inline)
         children = injectMathNodes(in: children, source: source, frontMatter: frontMatter)
 
-        // 4. Footnote support
+        // 6. Footnote support
         let (footnoteRefs, footnoteDefs) = FootnoteSupport.extractFootnotes(from: source)
         if !footnoteDefs.isEmpty {
             children.append(contentsOf: footnoteDefs)
@@ -119,6 +125,147 @@ public final class MarkdownParser: @unchecked Sendable {
             children: children,
             metadata: root.metadata
         )
+    }
+
+    private func annotateCalloutBlocks(_ node: TymarkNode) -> TymarkNode {
+        let updatedChildren = node.children.map { annotateCalloutBlocks($0) }
+        var updatedMetadata = node.metadata
+
+        if node.type == .blockquote,
+           let callout = parseCalloutHeader(from: node.content) {
+            updatedMetadata["calloutKind"] = callout.kind
+            if !callout.title.isEmpty {
+                updatedMetadata["calloutTitle"] = callout.title
+            }
+        }
+
+        return TymarkNode(
+            id: node.id,
+            type: node.type,
+            content: node.content,
+            range: node.range,
+            children: updatedChildren,
+            metadata: updatedMetadata
+        )
+    }
+
+    private func parseCalloutHeader(from blockquoteText: String) -> (kind: String, title: String)? {
+        let nsText = blockquoteText as NSString
+        let pattern = #"(?im)^\s*>\s*\[!([A-Za-z]+)\]\s*(.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(location: 0, length: nsText.length)
+        guard let match = regex.firstMatch(in: blockquoteText, range: range) else { return nil }
+
+        let kindRange = match.range(at: 1)
+        guard kindRange.location != NSNotFound else { return nil }
+        let kind = nsText.substring(with: kindRange).uppercased()
+
+        let titleRange = match.range(at: 2)
+        let title: String
+        if titleRange.location != NSNotFound {
+            title = nsText.substring(with: titleRange).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            title = ""
+        }
+
+        return (kind, title)
+    }
+
+    private func injectWikilinks(in children: [TymarkNode]) -> [TymarkNode] {
+        var result: [TymarkNode] = []
+        result.reserveCapacity(children.count)
+
+        for child in children {
+            let transformedChild: TymarkNode
+            if child.children.isEmpty {
+                transformedChild = child
+            } else {
+                transformedChild = TymarkNode(
+                    id: child.id,
+                    type: child.type,
+                    content: child.content,
+                    range: child.range,
+                    children: injectWikilinks(in: child.children),
+                    metadata: child.metadata
+                )
+            }
+
+            if case .text = transformedChild.type {
+                result.append(contentsOf: splitTextNodeForWikilinks(transformedChild))
+            } else {
+                result.append(transformedChild)
+            }
+        }
+
+        return result
+    }
+
+    private func splitTextNodeForWikilinks(_ textNode: TymarkNode) -> [TymarkNode] {
+        guard case .text = textNode.type else { return [textNode] }
+
+        let nsText = textNode.content as NSString
+        guard nsText.length > 0 else { return [textNode] }
+
+        let pattern = #"(!)?\[\[([^\]\n]+)\]\]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [textNode] }
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        let matches = regex.matches(in: textNode.content, range: fullRange)
+        guard !matches.isEmpty else { return [textNode] }
+
+        var nodes: [TymarkNode] = []
+        nodes.reserveCapacity(matches.count * 2 + 1)
+
+        var cursor = 0
+        for match in matches {
+            let matchRange = match.range
+            guard matchRange.location != NSNotFound, matchRange.length > 0 else { continue }
+
+            if matchRange.location > cursor {
+                let plainRange = NSRange(location: cursor, length: matchRange.location - cursor)
+                let plainText = nsText.substring(with: plainRange)
+                nodes.append(TymarkNode(
+                    type: .text,
+                    content: plainText,
+                    range: NSRange(
+                        location: textNode.range.location + plainRange.location,
+                        length: plainRange.length
+                    )
+                ))
+            }
+
+            let targetRange = match.range(at: 2)
+            guard targetRange.location != NSNotFound else { continue }
+            let rawTarget = nsText.substring(with: targetRange)
+            let target = rawTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isEmbedded = match.range(at: 1).location != NSNotFound
+            let rawWikilink = nsText.substring(with: matchRange)
+
+            nodes.append(TymarkNode(
+                type: .wikilink(target: target, isEmbedded: isEmbedded),
+                content: rawWikilink,
+                range: NSRange(
+                    location: textNode.range.location + matchRange.location,
+                    length: matchRange.length
+                )
+            ))
+
+            cursor = NSMaxRange(matchRange)
+        }
+
+        if cursor < nsText.length {
+            let tailRange = NSRange(location: cursor, length: nsText.length - cursor)
+            let tailText = nsText.substring(with: tailRange)
+            nodes.append(TymarkNode(
+                type: .text,
+                content: tailText,
+                range: NSRange(
+                    location: textNode.range.location + tailRange.location,
+                    length: tailRange.length
+                )
+            ))
+        }
+
+        return nodes.isEmpty ? [textNode] : nodes
     }
 
     private func reclassifyMermaidBlocks(_ node: TymarkNode) -> TymarkNode {

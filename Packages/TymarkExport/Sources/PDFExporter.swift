@@ -288,6 +288,15 @@ public final class PDFExporter: Exporter {
                 }
             }
 
+        case .wikilink(let target, _):
+            let destination = URL(fileURLWithPath: target + ".md")
+            let linkAttrs = bodyAttributes(theme: theme).merging([
+                .foregroundColor: theme.colors.link.nsColor,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .link: destination
+            ]) { _, new in new }
+            result.append(NSAttributedString(string: target, attributes: linkAttrs))
+
         case .image(_, let alt):
             // For PDF, represent images as alt text in brackets
             let altText = alt ?? "image"

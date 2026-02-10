@@ -894,7 +894,7 @@ final class ThemeTests: XCTestCase {
     }
 
     func testInequalityByColors() {
-        var colorsA = makeTestColors()
+        let colorsA = makeTestColors()
         var colorsB = makeTestColors()
         colorsB.background = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
 

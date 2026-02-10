@@ -27,6 +27,21 @@ public protocol TextManipulating: AnyObject {
     /// Duplicates the current line.
     func duplicateLine()
 
+    /// Adds another selection for the next occurrence of the current selection.
+    func addNextSelectionOccurrence()
+
+    /// Selects all occurrences of the current selection.
+    func selectAllSelectionOccurrences()
+
+    /// Adds a markdown table row below the current row.
+    func addTableRowBelow()
+
+    /// Adds a markdown table column after the current column.
+    func addTableColumnAfter()
+
+    /// Cycles markdown table alignment for the current column.
+    func cycleTableColumnAlignment()
+
     /// Increases the editor zoom level.
     func zoomIn()
 
@@ -321,6 +336,114 @@ extension TymarkTextView: TextManipulating {
         }
     }
 
+    public func addNextSelectionOccurrence() {
+        let selected = selectedText
+        guard !selected.isEmpty else { return }
+
+        let nsSource = string as NSString
+        let selectedRanges = self.selectedRanges
+            .map(\.rangeValue)
+            .sorted { $0.location < $1.location }
+
+        guard let lastRange = selectedRanges.last else { return }
+        let start = NSMaxRange(lastRange)
+        guard start < nsSource.length else { return }
+
+        let searchRange = NSRange(location: start, length: nsSource.length - start)
+        let next = nsSource.range(of: selected, options: [], range: searchRange)
+        guard next.location != NSNotFound else { return }
+
+        if selectedRanges.contains(where: { NSEqualRanges($0, next) }) {
+            return
+        }
+
+        var newRanges = selectedRanges
+        newRanges.append(next)
+        let values = newRanges.map { NSValue(range: $0) }
+        setSelectedRanges(values, affinity: .downstream, stillSelecting: false)
+        scrollRangeToVisible(next)
+    }
+
+    public func selectAllSelectionOccurrences() {
+        let selected = selectedText
+        guard !selected.isEmpty else { return }
+
+        let nsSource = string as NSString
+        var foundRanges: [NSRange] = []
+        var searchLocation = 0
+
+        while searchLocation < nsSource.length {
+            let searchRange = NSRange(location: searchLocation, length: nsSource.length - searchLocation)
+            let match = nsSource.range(of: selected, options: [], range: searchRange)
+            if match.location == NSNotFound || match.length == 0 {
+                break
+            }
+            foundRanges.append(match)
+            searchLocation = NSMaxRange(match)
+        }
+
+        guard !foundRanges.isEmpty else { return }
+        let values = foundRanges.map { NSValue(range: $0) }
+        setSelectedRanges(values, affinity: .downstream, stillSelecting: false)
+        if let first = foundRanges.first {
+            scrollRangeToVisible(first)
+        }
+    }
+
+    public func addTableRowBelow() {
+        guard let edit = makeTableEditContext() else { return }
+        let insertAt = max(2, edit.selectedRowIndex + 1)
+        let emptyRow = Array(repeating: "", count: edit.columnCount)
+        var lines = edit.lines
+        lines.insert(Self.renderTableRow(emptyRow), at: min(insertAt, lines.count))
+        replaceTable(in: edit.tableRange, with: lines)
+    }
+
+    public func addTableColumnAfter() {
+        guard let edit = makeTableEditContext() else { return }
+        let insertionIndex = min(edit.columnCount, max(0, edit.selectedColumnIndex + 1))
+        var lines = edit.lines
+
+        for index in lines.indices {
+            var cells = Self.parseTableRow(lines[index])
+            let newCell: String
+            if index == 1 {
+                newCell = "---"
+            } else {
+                newCell = ""
+            }
+            cells.insert(newCell, at: min(insertionIndex, cells.count))
+            lines[index] = Self.renderTableRow(cells)
+        }
+
+        replaceTable(in: edit.tableRange, with: lines)
+    }
+
+    public func cycleTableColumnAlignment() {
+        guard let edit = makeTableEditContext(), edit.lines.count > 1 else { return }
+        var lines = edit.lines
+        var separatorCells = Self.parseTableRow(lines[1])
+        let index = min(max(0, edit.selectedColumnIndex), max(0, separatorCells.count - 1))
+        guard index < separatorCells.count else { return }
+
+        let current = separatorCells[index].replacingOccurrences(of: " ", with: "")
+        let next: String
+        switch current {
+        case ":---":
+            next = ":---:"
+        case ":---:":
+            next = "---:"
+        case "---:":
+            next = "---"
+        default:
+            next = ":---"
+        }
+
+        separatorCells[index] = next
+        lines[1] = Self.renderTableRow(separatorCells)
+        replaceTable(in: edit.tableRange, with: lines)
+    }
+
     public func zoomIn() {
         zoomMultiplier = min(zoomMultiplier + 0.1, 3.0)
         applyZoom()
@@ -334,5 +457,146 @@ extension TymarkTextView: TextManipulating {
     public func resetZoom() {
         zoomMultiplier = 1.0
         applyZoom()
+    }
+}
+
+// MARK: - Markdown Table Editing
+
+private extension TymarkTextView {
+    struct TableEditContext {
+        let tableRange: NSRange
+        let lines: [String]
+        let selectedRowIndex: Int
+        let selectedColumnIndex: Int
+        let columnCount: Int
+    }
+
+    func makeTableEditContext() -> TableEditContext? {
+        let nsSource = string as NSString
+        guard nsSource.length > 0 else { return nil }
+
+        let caret = selectedRange().location
+        let currentLineRange = nsSource.lineRange(for: NSRange(location: min(caret, nsSource.length), length: 0))
+        let currentLine = nsSource.substring(with: currentLineRange)
+        guard Self.looksLikeTableLine(currentLine) else { return nil }
+
+        var start = currentLineRange.location
+        var end = NSMaxRange(currentLineRange)
+
+        while start > 0 {
+            let previousProbe = max(0, start - 1)
+            let previousLineRange = nsSource.lineRange(for: NSRange(location: previousProbe, length: 0))
+            let previousLine = nsSource.substring(with: previousLineRange)
+            if Self.looksLikeTableLine(previousLine) {
+                start = previousLineRange.location
+            } else {
+                break
+            }
+        }
+
+        while end < nsSource.length {
+            let nextLineRange = nsSource.lineRange(for: NSRange(location: end, length: 0))
+            let nextLine = nsSource.substring(with: nextLineRange)
+            if Self.looksLikeTableLine(nextLine) {
+                end = NSMaxRange(nextLineRange)
+            } else {
+                break
+            }
+        }
+
+        let tableRange = NSRange(location: start, length: max(0, end - start))
+        guard tableRange.length > 0 else { return nil }
+        var lines = nsSource.substring(with: tableRange).components(separatedBy: "\n")
+        while lines.last?.isEmpty == true {
+            lines.removeLast()
+        }
+
+        guard lines.count >= 2, Self.isSeparatorRow(lines[1]) else { return nil }
+
+        let lineStartOffsets = Self.computeLineOffsets(for: lines)
+        let localLocation = max(0, caret - tableRange.location)
+        let selectedRow = Self.rowIndex(for: localLocation, lineOffsets: lineStartOffsets)
+        let selectedColumn = Self.columnIndex(
+            in: lines[min(max(0, selectedRow), lines.count - 1)],
+            localLocation: localLocation - lineStartOffsets[min(max(0, selectedRow), lineStartOffsets.count - 1)]
+        )
+        let headerColumns = max(1, Self.parseTableRow(lines[0]).count)
+
+        return TableEditContext(
+            tableRange: tableRange,
+            lines: lines,
+            selectedRowIndex: selectedRow,
+            selectedColumnIndex: min(max(0, selectedColumn), headerColumns - 1),
+            columnCount: headerColumns
+        )
+    }
+
+    func replaceTable(in range: NSRange, with lines: [String]) {
+        guard let textStorage = self.textStorage else { return }
+        let rebuilt = lines.joined(separator: "\n") + "\n"
+
+        if shouldChangeText(in: range, replacementString: rebuilt) {
+            textStorage.replaceCharacters(in: range, with: rebuilt)
+            didChangeText()
+            let caret = range.location + rebuilt.utf16.count
+            setSelectedRange(NSRange(location: caret, length: 0))
+        }
+    }
+
+    static func looksLikeTableLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed.contains("|")
+    }
+
+    static func isSeparatorRow(_ line: String) -> Bool {
+        let cells = parseTableRow(line)
+        guard !cells.isEmpty else { return false }
+        return cells.allSatisfy { cell in
+            let stripped = cell.replacingOccurrences(of: " ", with: "")
+            let withoutColons = stripped.replacingOccurrences(of: ":", with: "")
+            return withoutColons.count >= 3 && withoutColons.allSatisfy { $0 == "-" }
+        }
+    }
+
+    static func parseTableRow(_ line: String) -> [String] {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let core = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "|"))
+        guard !core.isEmpty else { return [""] }
+        return core.split(separator: "|", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    static func renderTableRow(_ cells: [String]) -> String {
+        "| " + cells.joined(separator: " | ") + " |"
+    }
+
+    static func computeLineOffsets(for lines: [String]) -> [Int] {
+        var offsets: [Int] = []
+        offsets.reserveCapacity(lines.count)
+        var location = 0
+        for line in lines {
+            offsets.append(location)
+            location += (line as NSString).length + 1
+        }
+        return offsets
+    }
+
+    static func rowIndex(for localLocation: Int, lineOffsets: [Int]) -> Int {
+        guard !lineOffsets.isEmpty else { return 0 }
+        var best = 0
+        for index in lineOffsets.indices where lineOffsets[index] <= localLocation {
+            best = index
+        }
+        return best
+    }
+
+    static func columnIndex(in line: String, localLocation: Int) -> Int {
+        let nsLine = line as NSString
+        let safeLocation = max(0, min(localLocation, nsLine.length))
+        let prefix = nsLine.substring(to: safeLocation)
+        let pipeCount = prefix.filter { $0 == "|" }.count
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let leadingPipeAdjustment = trimmed.hasPrefix("|") ? 1 : 0
+        return max(0, pipeCount - leadingPipeAdjustment)
     }
 }

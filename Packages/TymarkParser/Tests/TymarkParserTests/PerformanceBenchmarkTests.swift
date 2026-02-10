@@ -15,6 +15,8 @@ final class PerformanceBenchmarkTests: XCTestCase {
     private var incrementalParser: IncrementalParser!
     private var diffEngine: ASTDiff!
 
+    private static let benchmarkEnvVar = "TYMARK_RUN_PERF_TESTS"
+
     // MARK: - Test Data
 
     /// Generates a markdown document of approximately the given line count.
@@ -81,18 +83,34 @@ final class PerformanceBenchmarkTests: XCTestCase {
 
     // MARK: - Setup / Teardown
 
-    override func setUp() {
-        super.setUp()
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try Self.requireBenchmarksEnabled()
         parser = MarkdownParser()
         incrementalParser = IncrementalParser()
         diffEngine = ASTDiff()
     }
 
-    override func tearDown() {
+    override func tearDownWithError() throws {
         parser = nil
         incrementalParser = nil
         diffEngine = nil
-        super.tearDown()
+        try super.tearDownWithError()
+    }
+
+    private static func requireBenchmarksEnabled() throws {
+        let processInfo = ProcessInfo.processInfo
+        let envEnabled = processInfo.environment[benchmarkEnvVar] == "1"
+        let argEnabled = processInfo.arguments.contains("--run-perf")
+        let markerPath = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".tymark-run-perf-tests")
+            .path
+        let fileEnabled = FileManager.default.fileExists(atPath: markerPath)
+        let enabled = envEnabled || argEnabled || fileEnabled
+        try XCTSkipUnless(
+            enabled,
+            "Performance benchmarks are opt-in. Run with \(benchmarkEnvVar)=1 swift test --filter PerformanceBenchmarkTests or create .tymark-run-perf-tests before running tests."
+        )
     }
 
     // MARK: - Parser Performance

@@ -659,9 +659,9 @@ final class CommandRegistryTests: XCTestCase {
 
     func testExecuteReturnsTrue() {
         var executed = false
-        let command = makeCommand(id: "test.cmd") {
+        let command = makeCommand(id: "test.cmd", execute: {
             executed = true
-        }
+        })
         registry.register(command)
         let result = registry.execute("test.cmd")
         XCTAssertTrue(result)
@@ -1599,13 +1599,12 @@ final class KeybindingHandlerRegistryIntegrationTests: XCTestCase {
 
     func testSetCommandRegistrySyncsBindings() {
         let registry = CommandRegistry()
-        var executed = false
         let command = CommandDefinition(
             id: "file.save",
             name: "Save",
             category: .file,
             defaultShortcut: "cmd+s",
-            execute: { executed = true }
+            execute: {}
         )
         registry.register(command)
 

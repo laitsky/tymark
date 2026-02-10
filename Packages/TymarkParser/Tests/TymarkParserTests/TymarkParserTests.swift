@@ -491,6 +491,38 @@ final class TymarkParserTests: XCTestCase {
         XCTAssertEqual(textChildren[0].content, "Click me")
     }
 
+    func testParseWikiLink() {
+        let document = parser.parse("Open [[Product Spec]] next.")
+        let paragraph = document.root.children[0]
+        let wikiNodes = children(of: paragraph) { type in
+            if case .wikilink = type { return true }
+            return false
+        }
+        XCTAssertEqual(wikiNodes.count, 1)
+        if case .wikilink(let target, let isEmbedded) = wikiNodes[0].type {
+            XCTAssertEqual(target, "Product Spec")
+            XCTAssertFalse(isEmbedded)
+        } else {
+            XCTFail("Expected wikilink node type")
+        }
+    }
+
+    func testParseEmbeddedWikiLink() {
+        let document = parser.parse("![[Roadmap/2026-Q1]]")
+        let paragraph = document.root.children[0]
+        let wikiNodes = children(of: paragraph) { type in
+            if case .wikilink = type { return true }
+            return false
+        }
+        XCTAssertEqual(wikiNodes.count, 1)
+        if case .wikilink(let target, let isEmbedded) = wikiNodes[0].type {
+            XCTAssertEqual(target, "Roadmap/2026-Q1")
+            XCTAssertTrue(isEmbedded)
+        } else {
+            XCTFail("Expected embedded wikilink node type")
+        }
+    }
+
     // MARK: - 3. Inline Elements: Images
 
     func testParseImage() {
@@ -522,6 +554,20 @@ final class TymarkParserTests: XCTestCase {
         } else {
             XCTFail("Expected image node type")
         }
+    }
+
+    func testParseCalloutMetadataOnBlockquote() {
+        let markdown = """
+        > [!WARNING] Deprecated API
+        > This endpoint will be removed soon.
+        """
+        let document = parser.parse(markdown)
+        guard let blockquote = document.root.children.first(where: { $0.type == .blockquote }) else {
+            XCTFail("Expected blockquote node")
+            return
+        }
+        XCTAssertEqual(blockquote.metadata["calloutKind"], "WARNING")
+        XCTAssertEqual(blockquote.metadata["calloutTitle"], "Deprecated API")
     }
 
     // MARK: - 3. Inline Elements: Strikethrough
@@ -762,6 +808,7 @@ final class TymarkParserTests: XCTestCase {
             .strong,
             .inlineCode,
             .link(destination: "", title: nil),
+            .wikilink(target: "page", isEmbedded: false),
             .image(source: "", alt: nil),
             .softBreak,
             .lineBreak,
@@ -782,6 +829,7 @@ final class TymarkParserTests: XCTestCase {
             .strong,
             .inlineCode,
             .link(destination: "url", title: "title"),
+            .wikilink(target: "index", isEmbedded: false),
             .image(source: "src", alt: "alt"),
             .softBreak,
             .lineBreak,
@@ -1856,6 +1904,14 @@ final class TymarkParserTests: XCTestCase {
         XCTAssertEqual(
             TymarkNodeType.link(destination: "url", title: nil),
             TymarkNodeType.link(destination: "url", title: nil)
+        )
+        XCTAssertEqual(
+            TymarkNodeType.wikilink(target: "Design", isEmbedded: false),
+            TymarkNodeType.wikilink(target: "Design", isEmbedded: false)
+        )
+        XCTAssertNotEqual(
+            TymarkNodeType.wikilink(target: "Design", isEmbedded: false),
+            TymarkNodeType.wikilink(target: "Design", isEmbedded: true)
         )
         XCTAssertNotEqual(
             TymarkNodeType.link(destination: "url1", title: nil),

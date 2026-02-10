@@ -17,10 +17,13 @@ public final class TymarkTextView: NSTextView {
     private var pendingRender = false
     private var isApplyingInternalUpdate = false
     private var nodeSyntaxVisibility: [UUID: Bool] = [:]
+    private var pendingSyntaxHideTasks: [UUID: DispatchWorkItem] = [:]
     private var isSourceModeEnabledStorage = false
+    private var isTypewriterModeEnabledStorage = false
 
     /// Whether the editor is currently in source mode (shows all markdown syntax).
     public var isSourceModeEnabled: Bool { isSourceModeEnabledStorage }
+    public var isTypewriterModeEnabled: Bool { isTypewriterModeEnabledStorage }
 
     /// Zoom multiplier for font scaling. Persisted to UserDefaults.
     public var zoomMultiplier: CGFloat {
@@ -40,7 +43,11 @@ public final class TymarkTextView: NSTextView {
     public let imagePasteHandler = ImagePasteHandler()
 
     /// The URL of the current document (set by the coordinator).
-    public var documentURL: URL?
+    public var documentURL: URL? {
+        didSet {
+            (layoutManager as? TymarkTextLayoutManager)?.documentURL = documentURL
+        }
+    }
 
     public weak var keybindingHandler: KeybindingHandler?
     public weak var vimModeHandler: VimModeHandler? {
@@ -59,6 +66,7 @@ public final class TymarkTextView: NSTextView {
         self.parserState = ParserState()
         self.renderingContext = Self.makeRenderingContext(theme: theme)
         self.cursorTracker = CursorProximityTracker()
+        self.isTypewriterModeEnabledStorage = theme.editor.typewriterMode
 
         // Configure text container
         let textContainer = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
@@ -137,14 +145,24 @@ public final class TymarkTextView: NSTextView {
         guard isSourceModeEnabledStorage != enabled else { return }
         isSourceModeEnabledStorage = enabled
         nodeSyntaxVisibility.removeAll(keepingCapacity: true)
+        cancelPendingSyntaxHideTasks()
         self.renderingContext = Self.makeRenderingContext(theme: theme, zoom: zoomMultiplier, isSourceMode: enabled)
         renderDocument()
     }
 
     public func updateTheme(_ newTheme: Theme) {
         self.theme = newTheme
+        self.isTypewriterModeEnabledStorage = newTheme.editor.typewriterMode
         self.renderingContext = Self.makeRenderingContext(theme: newTheme, zoom: zoomMultiplier, isSourceMode: isSourceModeEnabledStorage)
         renderDocument()
+    }
+
+    public func setTypewriterMode(_ enabled: Bool) {
+        guard isTypewriterModeEnabledStorage != enabled else { return }
+        isTypewriterModeEnabledStorage = enabled
+        if enabled {
+            centerSelectionInViewport()
+        }
     }
 
     public var documentSource: String {
@@ -168,6 +186,7 @@ public final class TymarkTextView: NSTextView {
         // Replace content while preserving selection if possible
         let previousSelection = self.selectedRange()
         nodeSyntaxVisibility.removeAll(keepingCapacity: true)
+        cancelPendingSyntaxHideTasks()
 
         performInternalUpdate {
             self.textStorage?.setAttributedString(attributedString)
@@ -178,6 +197,7 @@ public final class TymarkTextView: NSTextView {
             let safeLength = max(0, min(previousSelection.length, maxLocation - safeLocation))
             self.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
         }
+        (layoutManager as? TymarkTextLayoutManager)?.setDocument(parserState.document)
 
         isRenderingInProgress = false
 
@@ -187,6 +207,8 @@ public final class TymarkTextView: NSTextView {
         } else if !isSourceModeEnabledStorage {
             updateCursorProximity()
         }
+
+        centerSelectionInViewport()
     }
 
     private func renderIncremental(using updateInfo: IncrementalUpdateInfo) {
@@ -208,6 +230,7 @@ public final class TymarkTextView: NSTextView {
                 }
             }
         }
+        (layoutManager as? TymarkTextLayoutManager)?.setDocument(parserState.document)
 
         if !isSourceModeEnabledStorage {
             updateCursorProximity()
@@ -246,10 +269,25 @@ public final class TymarkTextView: NSTextView {
     }
 
     private func applySyntaxVisibility(node: TymarkNode, showSource: Bool) {
-        // Skip if we already applied this visibility state for the node.
-        if nodeSyntaxVisibility[node.id] == showSource {
+        if showSource {
+            pendingSyntaxHideTasks[node.id]?.cancel()
+            pendingSyntaxHideTasks.removeValue(forKey: node.id)
+            applySyntaxVisibilityImmediately(node: node, showSource: true)
             return
         }
+
+        // Delay hiding slightly to avoid flicker while the cursor moves across token edges.
+        pendingSyntaxHideTasks[node.id]?.cancel()
+        let task = DispatchWorkItem { [weak self] in
+            self?.applySyntaxVisibilityImmediately(node: node, showSource: false)
+            self?.pendingSyntaxHideTasks.removeValue(forKey: node.id)
+        }
+        pendingSyntaxHideTasks[node.id] = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: task)
+    }
+
+    private func applySyntaxVisibilityImmediately(node: TymarkNode, showSource: Bool) {
+        if nodeSyntaxVisibility[node.id] == showSource { return }
         nodeSyntaxVisibility[node.id] = showSource
 
         // This would toggle the visibility of markdown syntax characters
@@ -310,9 +348,66 @@ public final class TymarkTextView: NSTextView {
                 NSRange(location: node.range.location + match.range.location, length: match.range.length)
             }
 
+        case .wikilink:
+            let open = raw.hasPrefix("![[") ? 3 : (raw.hasPrefix("[[") ? 2 : 0)
+            let close = raw.hasSuffix("]]") ? 2 : 0
+            var ranges: [NSRange] = []
+            if open > 0 {
+                ranges.append(NSRange(location: node.range.location, length: min(open, rawLength)))
+            }
+            if close > 0, rawLength >= close {
+                ranges.append(NSRange(location: NSMaxRange(node.range) - close, length: close))
+            }
+            return ranges
+
+        case .image:
+            guard rawLength >= 4 else { return [] }
+            let leadingLength = raw.hasPrefix("![") ? 2 : 0
+            let trailingLength = raw.hasSuffix(")") ? 1 : 0
+            var ranges: [NSRange] = []
+            if leadingLength > 0 {
+                ranges.append(NSRange(location: node.range.location, length: leadingLength))
+            }
+            if trailingLength > 0 {
+                ranges.append(NSRange(location: NSMaxRange(node.range) - trailingLength, length: trailingLength))
+            }
+            return ranges
+
         default:
             return []
         }
+    }
+
+    private func cancelPendingSyntaxHideTasks() {
+        for (_, task) in pendingSyntaxHideTasks {
+            task.cancel()
+        }
+        pendingSyntaxHideTasks.removeAll(keepingCapacity: true)
+    }
+
+    private func centerSelectionInViewport() {
+        guard isTypewriterModeEnabledStorage else { return }
+        guard let scrollView = enclosingScrollView,
+              let layoutManager = self.layoutManager,
+              let textContainer = self.textContainer else { return }
+
+        let sourceLength = (string as NSString).length
+        let selection = selectedRange()
+        guard sourceLength > 0 else { return }
+
+        let caretLocation = min(max(0, selection.location), max(0, sourceLength - 1))
+        let caretRange = NSRange(location: caretLocation, length: 1)
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: caretRange, actualCharacterRange: nil)
+        var caretRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        caretRect.origin.x += textContainerOrigin.x
+        caretRect.origin.y += textContainerOrigin.y
+
+        let clipView = scrollView.contentView
+        let visibleRect = clipView.bounds
+        let maxY = max(0, bounds.height - visibleRect.height)
+        let targetY = min(max(0, caretRect.midY - visibleRect.height / 2), maxY)
+        clipView.scroll(to: NSPoint(x: visibleRect.origin.x, y: targetY))
+        scrollView.reflectScrolledClipView(clipView)
     }
 
     private static func headingPrefixLength(in text: String) -> Int {
@@ -405,6 +500,7 @@ public final class TymarkTextView: NSTextView {
     @objc private func selectionDidChangeNotification(_ notification: Notification) {
         if isApplyingInternalUpdate { return }
         updateCursorProximity()
+        centerSelectionInViewport()
     }
 
     private func performInternalUpdate(_ work: () -> Void) {

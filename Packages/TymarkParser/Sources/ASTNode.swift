@@ -14,6 +14,7 @@ public enum TymarkNodeType: Equatable, Hashable {
     case emphasis
     case strong
     case link(destination: String, title: String?)
+    case wikilink(target: String, isEmbedded: Bool)
     case image(source: String, alt: String?)
     case text
     case softBreak
@@ -111,7 +112,7 @@ extension TymarkNode {
 
     public var isInline: Bool {
         switch type {
-        case .text, .emphasis, .strong, .inlineCode, .link, .image,
+        case .text, .emphasis, .strong, .inlineCode, .link, .wikilink, .image,
              .softBreak, .lineBreak, .strikethrough, .footnoteReference:
             return true
         case .math(let display):

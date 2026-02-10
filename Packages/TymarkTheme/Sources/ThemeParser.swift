@@ -312,6 +312,7 @@ public struct ThemeTemplateGenerator {
     public static func generateThemeTemplate() -> String {
         return """
         {
+          "id": "00000000-0000-0000-0000-000000000001",
           "name": "My Custom Theme",
           "identifier": "custom.my-theme",
           "is_built_in": false,
@@ -346,7 +347,13 @@ public struct ThemeTemplateGenerator {
             "heading_spacing_bottom": 12,
             "list_indentation": 24,
             "blockquote_indentation": 16,
-            "code_block_padding": 12
+            "code_block_padding": 12,
+            "page_margins": {
+              "top": 20,
+              "left": 20,
+              "bottom": 20,
+              "right": 20
+            }
           },
           "editor": {
             "show_line_numbers": false,

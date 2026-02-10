@@ -220,8 +220,18 @@ public final class ASTToAttributedString {
                     range: range,
                     maxLength: maxLength
                 )
+            case .wikilink(let target, let isEmbedded):
+                applyWikilink(
+                    target: target,
+                    isEmbedded: isEmbedded,
+                    nodeRange: range,
+                    to: attributed,
+                    nsSource: nsSource
+                )
+            case .image(let source, _):
+                applyImageSyntax(source: source, nodeRange: range, to: attributed, nsSource: nsSource)
             case .blockquote:
-                applyBlockquote(nodeRange: range, to: attributed, nsSource: nsSource)
+                applyBlockquote(node: node, nodeRange: range, to: attributed, nsSource: nsSource)
             case .frontMatter, .math, .mermaid:
                 safeAddAttributes(
                     [
@@ -316,17 +326,100 @@ public final class ASTToAttributedString {
         }
     }
 
-    private func applyBlockquote(nodeRange: NSRange, to attributed: NSMutableAttributedString, nsSource: NSString) {
+    private func applyWikilink(
+        target: String,
+        isEmbedded: Bool,
+        nodeRange: NSRange,
+        to attributed: NSMutableAttributedString,
+        nsSource: NSString
+    ) {
+        let maxLength = nsSource.length
+        safeAddAttributes(
+            [
+                .foregroundColor: context.linkColor,
+                .underlineStyle: (isEmbedded
+                    ? NSUnderlineStyle.patternDot.union(.single).rawValue
+                    : NSUnderlineStyle.single.rawValue),
+                TymarkRenderingAttribute.linkDestinationKey: target
+            ],
+            to: attributed,
+            range: nodeRange,
+            maxLength: maxLength
+        )
+
+        guard !context.isSourceMode else { return }
+
+        // Hide [[...]] (and leading ! for embeds) while keeping the page target readable.
+        let raw = nsSource.substring(with: nodeRange) as NSString
+        let openLength = raw.hasPrefix("![[") ? 3 : 2
+        let closeLength = raw.hasSuffix("]]") ? 2 : 0
+
+        if openLength > 0, nodeRange.length >= openLength {
+            safeAddAttributes(
+                [.foregroundColor: context.syntaxHiddenColor],
+                to: attributed,
+                range: NSRange(location: nodeRange.location, length: openLength),
+                maxLength: maxLength
+            )
+        }
+        if closeLength > 0, nodeRange.length >= closeLength {
+            safeAddAttributes(
+                [.foregroundColor: context.syntaxHiddenColor],
+                to: attributed,
+                range: NSRange(location: NSMaxRange(nodeRange) - closeLength, length: closeLength),
+                maxLength: maxLength
+            )
+        }
+    }
+
+    private func applyImageSyntax(source: String, nodeRange: NSRange, to attributed: NSMutableAttributedString, nsSource: NSString) {
+        let maxLength = nsSource.length
+        safeAddAttributes(
+            [
+                .foregroundColor: context.linkColor,
+                TymarkRenderingAttribute.imageSourceKey: source
+            ],
+            to: attributed,
+            range: nodeRange,
+            maxLength: maxLength
+        )
+
+        guard !context.isSourceMode else { return }
+
+        // Keep alt text/path readable while dimming ![]() marker syntax.
+        guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\([^)]+\)"#) else { return }
+        let raw = nsSource.substring(with: nodeRange)
+        let rawRange = NSRange(location: 0, length: (raw as NSString).length)
+        guard let match = regex.firstMatch(in: raw, range: rawRange) else { return }
+
+        let markerRanges: [NSRange] = [
+            NSRange(location: match.range.location, length: 2), // ![
+            NSRange(location: match.range.location + match.range.length - 1, length: 1) // )
+        ]
+
+        for marker in markerRanges {
+            let global = NSRange(location: nodeRange.location + marker.location, length: marker.length)
+            safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: global, maxLength: maxLength)
+        }
+    }
+
+    private func applyBlockquote(node: TymarkNode, nodeRange: NSRange, to attributed: NSMutableAttributedString, nsSource: NSString) {
         let maxLength = nsSource.length
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.headIndent = 18
         paragraphStyle.firstLineHeadIndent = 18
         paragraphStyle.paragraphSpacing = 4
 
+        let isCallout = node.metadata["calloutKind"] != nil
+        let backgroundColor = isCallout
+            ? context.codeBackgroundColor.withAlphaComponent(0.45)
+            : context.codeBackgroundColor.withAlphaComponent(0.15)
+
         safeAddAttributes(
             [
                 .foregroundColor: context.blockquoteColor,
-                .paragraphStyle: paragraphStyle
+                .paragraphStyle: paragraphStyle,
+                .backgroundColor: backgroundColor
             ],
             to: attributed,
             range: nodeRange,
@@ -342,6 +435,13 @@ public final class ASTToAttributedString {
         for match in matches {
             let local = match.range
             let global = NSRange(location: nodeRange.location + local.location, length: local.length)
+            safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: global, maxLength: maxLength)
+        }
+
+        if isCallout,
+           let calloutRegex = try? NSRegularExpression(pattern: #"(?im)^\s*>\s*\[![A-Za-z]+\]\s*"#),
+           let match = calloutRegex.firstMatch(in: raw, range: NSRange(location: 0, length: rawNS.length)) {
+            let global = NSRange(location: nodeRange.location + match.range.location, length: match.range.length)
             safeAddAttributes([.foregroundColor: context.syntaxHiddenColor], to: attributed, range: global, maxLength: maxLength)
         }
     }
@@ -402,7 +502,7 @@ public final class ASTToAttributedString {
         #if canImport(AppKit)
         var symbolic = font.fontDescriptor.symbolicTraits
         symbolic.formUnion(traits)
-        let descriptor = font.fontDescriptor.withSymbolicTraits(symbolic) ?? font.fontDescriptor
+        let descriptor = font.fontDescriptor.withSymbolicTraits(symbolic)
         return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
         #else
         var symbolic = font.fontDescriptor.symbolicTraits

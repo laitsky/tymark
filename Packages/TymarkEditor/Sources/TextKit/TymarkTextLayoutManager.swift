@@ -9,6 +9,8 @@ public final class TymarkTextLayoutManager: NSLayoutManager {
 
     private var layoutFragments: [NSTextLayoutFragment] = []
     private var currentDocument: TymarkDocument?
+    public var documentURL: URL?
+    private var imagePreviewCache: [String: NSImage] = [:]
 
     // MARK: - Initialization
 
@@ -60,6 +62,13 @@ public final class TymarkTextLayoutManager: NSLayoutManager {
                     self.drawBlockQuoteIndicator(forCharacterRange: attrRange, at: origin, in: textStorage)
                 case .thematicBreak:
                     self.drawHorizontalRule(forCharacterRange: attrRange, at: origin, in: textStorage)
+                case .image:
+                    self.drawInlineImagePreview(
+                        forCharacterRange: attrRange,
+                        at: origin,
+                        attributes: attributes,
+                        in: textStorage
+                    )
                 default:
                     break
                 }
@@ -118,6 +127,69 @@ public final class TymarkTextLayoutManager: NSLayoutManager {
         let path = NSBezierPath(rect: lineRect)
         NSColor.separatorColor.setFill()
         path.fill()
+    }
+
+    private func drawInlineImagePreview(
+        forCharacterRange range: NSRange,
+        at origin: NSPoint,
+        attributes: [NSAttributedString.Key: Any],
+        in textStorage: NSTextStorage
+    ) {
+        guard let source = attributes[TymarkRenderingAttribute.imageSourceKey] as? String else { return }
+        guard let textContainer = self.textContainers.first else { return }
+
+        let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = self.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        guard !rect.isEmpty else { return }
+        let adjustedRect = rect.offsetBy(dx: origin.x, dy: origin.y)
+
+        let edge = min(22, max(14, adjustedRect.height - 2))
+        let badgeRect = NSRect(
+            x: adjustedRect.minX + 2,
+            y: adjustedRect.minY + max(0, (adjustedRect.height - edge) / 2),
+            width: edge,
+            height: edge
+        )
+
+        let path = NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4)
+        NSColor.controlBackgroundColor.withAlphaComponent(0.85).setFill()
+        path.fill()
+        NSColor.separatorColor.withAlphaComponent(0.7).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        if let image = resolveInlineImage(from: source) {
+            image.draw(in: badgeRect.insetBy(dx: 2, dy: 2))
+        } else {
+            let imageSymbol = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
+            imageSymbol?.draw(in: badgeRect.insetBy(dx: 3, dy: 3))
+        }
+    }
+
+    private func resolveInlineImage(from source: String) -> NSImage? {
+        if let cached = imagePreviewCache[source] {
+            return cached
+        }
+
+        let resolvedURL: URL
+        if source.hasPrefix("http://") || source.hasPrefix("https://") {
+            return nil
+        } else {
+            let rawURL = URL(fileURLWithPath: source, isDirectory: false)
+            if rawURL.isFileURL, rawURL.path.hasPrefix("/") {
+                resolvedURL = rawURL
+            } else if let documentURL {
+                resolvedURL = documentURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent(source)
+            } else {
+                resolvedURL = URL(fileURLWithPath: source, isDirectory: false)
+            }
+        }
+
+        guard let image = NSImage(contentsOf: resolvedURL) else { return nil }
+        imagePreviewCache[source] = image
+        return image
     }
 
     // MARK: - Public API

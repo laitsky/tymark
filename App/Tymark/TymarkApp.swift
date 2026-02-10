@@ -18,7 +18,7 @@ struct TymarkApp: App {
 
     var body: some Scene {
         DocumentGroup(newDocument: { TymarkDocumentModel() }) { configuration in
-            ContentView(document: configuration.document, fileURL: configuration.fileURL)
+            WorkspaceContentView(document: configuration.document, fileURL: configuration.fileURL)
                 .environmentObject(appState)
         }
         .commands {
@@ -50,6 +50,9 @@ final class AppState: ObservableObject {
     @Published var pendingExportFormat: String?
     @Published var isFocusModeEnabled = false
     @Published var sourceModeShouldToggle = false
+    @Published var workspaceViewMode: WorkspaceViewMode = .split
+    @Published var isInspectorVisible = true
+    @Published var isTypewriterModeEnabled = UserDefaults.standard.bool(forKey: "enableTypewriterMode")
 
     // Phase 6: Zen mode, Find/Replace, Statistics
     @Published var isZenModeEnabled = false
@@ -203,6 +206,24 @@ final class AppState: ObservableObject {
                 self?.sendAppAction("selectAll:")
             },
 
+            CommandDefinition(
+                id: "edit.addNextOccurrence",
+                name: "Add Next Occurrence",
+                category: .edit,
+                defaultShortcut: "cmd+d"
+            ) { [weak self] in
+                self?.activeTextManipulator?.addNextSelectionOccurrence()
+            },
+
+            CommandDefinition(
+                id: "edit.selectAllOccurrences",
+                name: "Select All Occurrences",
+                category: .edit,
+                defaultShortcut: "cmd+shift+l"
+            ) { [weak self] in
+                self?.activeTextManipulator?.selectAllSelectionOccurrences()
+            },
+
             // View commands
             CommandDefinition(
                 id: "view.commandPalette",
@@ -241,6 +262,17 @@ final class AppState: ObservableObject {
             },
 
             CommandDefinition(
+                id: "view.toggleTypewriterMode",
+                name: "Toggle Typewriter Mode",
+                category: .view,
+                defaultShortcut: "cmd+shift+t"
+            ) { [weak self] in
+                guard let self else { return }
+                self.isTypewriterModeEnabled.toggle()
+                UserDefaults.standard.set(self.isTypewriterModeEnabled, forKey: "enableTypewriterMode")
+            },
+
+            CommandDefinition(
                 id: "view.toggleSourceMode",
                 name: "Toggle Source Mode",
                 category: .view,
@@ -248,6 +280,42 @@ final class AppState: ObservableObject {
             ) { [weak self] in
                 // Source mode toggled via EditorViewModel in ContentView
                 self?.sourceModeShouldToggle = true
+            },
+
+            CommandDefinition(
+                id: "view.modeEditor",
+                name: "View: Editor Only",
+                category: .view,
+                defaultShortcut: "cmd+alt+1"
+            ) { [weak self] in
+                self?.workspaceViewMode = .editor
+            },
+
+            CommandDefinition(
+                id: "view.modeSplit",
+                name: "View: Split",
+                category: .view,
+                defaultShortcut: "cmd+alt+2"
+            ) { [weak self] in
+                self?.workspaceViewMode = .split
+            },
+
+            CommandDefinition(
+                id: "view.modePreview",
+                name: "View: Preview Only",
+                category: .view,
+                defaultShortcut: "cmd+alt+3"
+            ) { [weak self] in
+                self?.workspaceViewMode = .preview
+            },
+
+            CommandDefinition(
+                id: "view.toggleInspector",
+                name: "Toggle Inspector",
+                category: .view,
+                defaultShortcut: "cmd+shift+i"
+            ) { [weak self] in
+                self?.isInspectorVisible.toggle()
             },
 
             CommandDefinition(
@@ -420,6 +488,45 @@ final class AppState: ObservableObject {
                 defaultShortcut: "cmd+shift+c"
             ) { [weak self] in
                 self?.activeTextManipulator?.insertAtCursor("\n```\n\n```\n")
+            },
+
+            CommandDefinition(
+                id: "format.insertTable",
+                name: "Insert Table",
+                category: .format,
+                defaultShortcut: "cmd+alt+t"
+            ) { [weak self] in
+                self?.activeTextManipulator?.insertAtCursor(
+                    """
+                    | Column 1 | Column 2 |
+                    | --- | --- |
+                    |  |  |
+                    """
+                )
+            },
+
+            CommandDefinition(
+                id: "format.tableAddRow",
+                name: "Table: Add Row Below",
+                category: .format
+            ) { [weak self] in
+                self?.activeTextManipulator?.addTableRowBelow()
+            },
+
+            CommandDefinition(
+                id: "format.tableAddColumn",
+                name: "Table: Add Column",
+                category: .format
+            ) { [weak self] in
+                self?.activeTextManipulator?.addTableColumnAfter()
+            },
+
+            CommandDefinition(
+                id: "format.tableCycleAlignment",
+                name: "Table: Cycle Column Alignment",
+                category: .format
+            ) { [weak self] in
+                self?.activeTextManipulator?.cycleTableColumnAlignment()
             },
 
             CommandDefinition(
@@ -613,6 +720,14 @@ final class AppState: ObservableObject {
             ) { [weak self] in
                 self?.vimModeHandler.isEnabled.toggle()
             },
+
+            CommandDefinition(
+                id: "tools.appleWritingTools",
+                name: "Apple Writing Tools",
+                category: .tools
+            ) { [weak self] in
+                self?.sendAppAction("showWritingTools:")
+            },
         ])
     }
 
@@ -653,22 +768,23 @@ final class AIAssistantState: ObservableObject {
     @Published var isUsingCloud: Bool = false
 
     private var currentEngine: (any AIServiceProtocol)?
-    private var cursorTimer: Timer?
+    private var cursorTask: Task<Void, Never>?
 
     /// Callback to insert accepted text into the editor.
     var onAcceptResponse: ((String) -> Void)?
 
     init() {
-        // Cursor blink timer
-        cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+        cursorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { break }
                 self?.cursorVisible.toggle()
             }
         }
     }
 
     deinit {
-        cursorTimer?.invalidate()
+        cursorTask?.cancel()
     }
 
     func run(text: String, context: String, configuration: AIConfiguration) {
@@ -1698,6 +1814,7 @@ struct EditorSettingsView: View {
     @AppStorage("useSpacesForTabs") private var useSpacesForTabs = true
     @AppStorage("enableSmartPairs") private var enableSmartPairs = true
     @AppStorage("enableSmartLists") private var enableSmartLists = true
+    @AppStorage("enableTypewriterMode") private var enableTypewriterMode = false
     @EnvironmentObject var appState: AppState
 
     var body: some View {
@@ -1712,6 +1829,7 @@ struct EditorSettingsView: View {
                 Toggle("Use spaces for tabs", isOn: $useSpacesForTabs)
                 Toggle("Enable smart pairs", isOn: $enableSmartPairs)
                 Toggle("Enable smart lists", isOn: $enableSmartLists)
+                Toggle("Enable typewriter scrolling", isOn: $enableTypewriterMode)
             }
 
             Section("Vim Mode") {
@@ -1726,6 +1844,12 @@ struct EditorSettingsView: View {
             }
         }
         .padding()
+        .onAppear {
+            appState.isTypewriterModeEnabled = enableTypewriterMode
+        }
+        .onChange(of: enableTypewriterMode) { _, newValue in
+            appState.isTypewriterModeEnabled = newValue
+        }
     }
 }
 
@@ -1907,6 +2031,28 @@ struct TymarkCommands: Commands {
                 appState.isCommandPaletteVisible.toggle()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Editor Only") {
+                appState.workspaceViewMode = .editor
+            }
+            .keyboardShortcut("1", modifiers: [.command, .option])
+
+            Button("Split Editor + Preview") {
+                appState.workspaceViewMode = .split
+            }
+            .keyboardShortcut("2", modifiers: [.command, .option])
+
+            Button("Preview Only") {
+                appState.workspaceViewMode = .preview
+            }
+            .keyboardShortcut("3", modifiers: [.command, .option])
+
+            Button("Toggle Inspector") {
+                appState.isInspectorVisible.toggle()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
 
             Divider()
 

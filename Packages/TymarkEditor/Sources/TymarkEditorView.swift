@@ -14,6 +14,7 @@ public struct TymarkEditorView: NSViewRepresentable {
     @ObservedObject public var viewModel: EditorViewModel
     public var keybindingHandler: KeybindingHandler?
     public var vimModeHandler: VimModeHandler?
+    public var isTypewriterModeEnabled: Bool
     /// Callback invoked when the text view is created, providing a TextManipulating reference.
     public var onTextManipulatorReady: ((any TextManipulating) -> Void)?
     /// The URL of the current document, used for image paste.
@@ -27,6 +28,7 @@ public struct TymarkEditorView: NSViewRepresentable {
         viewModel: EditorViewModel,
         keybindingHandler: KeybindingHandler? = nil,
         vimModeHandler: VimModeHandler? = nil,
+        isTypewriterModeEnabled: Bool = false,
         onTextManipulatorReady: ((any TextManipulating) -> Void)? = nil,
         documentURL: URL? = nil
     ) {
@@ -35,6 +37,7 @@ public struct TymarkEditorView: NSViewRepresentable {
         self.viewModel = viewModel
         self.keybindingHandler = keybindingHandler
         self.vimModeHandler = vimModeHandler
+        self.isTypewriterModeEnabled = isTypewriterModeEnabled
         self.onTextManipulatorReady = onTextManipulatorReady
         self.documentURL = documentURL
     }
@@ -65,6 +68,7 @@ public struct TymarkEditorView: NSViewRepresentable {
         textView.keybindingHandler = keybindingHandler
         textView.vimModeHandler = vimModeHandler
         textView.documentURL = documentURL
+        textView.setTypewriterMode(isTypewriterModeEnabled)
 
         // Set the coordinator as delegate
         textView.delegate = context.coordinator
@@ -106,6 +110,10 @@ public struct TymarkEditorView: NSViewRepresentable {
 
         if textView.vimModeHandler !== vimModeHandler {
             textView.vimModeHandler = vimModeHandler
+        }
+
+        if textView.isTypewriterModeEnabled != isTypewriterModeEnabled {
+            textView.setTypewriterMode(isTypewriterModeEnabled)
         }
 
         // Update document URL for image paste
@@ -357,6 +365,10 @@ public final class EditorViewModel: ObservableObject {
         case .link(let destination, _):
             let content = node.children.map(convertNodeToHTML).joined()
             return "<a href=\"\(escapeHTML(destination))\">\(content)</a>"
+
+        case .wikilink(let target, _):
+            let href = escapeHTML(target.replacingOccurrences(of: " ", with: "-") + ".md")
+            return "<a href=\"\(href)\">\(escapeHTML(target))</a>"
 
         case .image(let source, let alt):
             return "<img src=\"\(escapeHTML(source))\" alt=\"\(escapeHTML(alt ?? ""))\">"

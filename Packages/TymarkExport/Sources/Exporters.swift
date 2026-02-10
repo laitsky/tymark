@@ -163,6 +163,10 @@ public final class HTMLExporter: Exporter {
             let titleAttr = title.map { " title=\"\(escapeHTML($0))\"" } ?? ""
             return "<a href=\"\(escapeHTML(destination))\"\(titleAttr)>\(node.children.map(convertToHTML).joined())</a>"
 
+        case .wikilink(let target, _):
+            let slug = target.replacingOccurrences(of: " ", with: "-")
+            return "<a href=\"\(escapeHTML(slug)).md\">\(escapeHTML(target))</a>"
+
         case .image(let source, let alt):
             let altAttr = alt.map { " alt=\"\(escapeHTML($0))\"" } ?? ""
             return "<img src=\"\(escapeHTML(source))\"\(altAttr)>\n"
@@ -244,28 +248,121 @@ public final class HTMLExporter: Exporter {
     }
 
     private func convertTableContent(_ table: TymarkNode) -> String {
+        let rows = collectTableRows(in: table)
+        if !rows.isEmpty {
+            let rendered = renderTableRows(rows)
+            if rendered.contains("<td>") || rows.count > 1 {
+                return rendered
+            }
+        }
+
+        // Fallback: parse raw table markdown if parser did not surface body rows/cells in AST.
+        let fallbackRows = parseRowsFromRawTable(table.content)
+        guard !fallbackRows.isEmpty else { return "" }
+        return renderFallbackRows(fallbackRows)
+    }
+
+    private func renderTableRows(_ rows: [TymarkNode]) -> String {
         var html = ""
-        for (index, row) in table.children.enumerated() {
-            guard case .tableRow = row.type else { continue }
+        for (index, row) in rows.enumerated() {
+            let cells = collectTableCells(in: row)
+            guard !cells.isEmpty else { continue }
 
             if index == 0 {
                 // Header row
                 html += "<thead>\n<tr>"
-                for cell in row.children {
+                for cell in cells {
                     html += "<th>\(cell.children.map(convertToHTML).joined())</th>"
                 }
                 html += "</tr>\n</thead>\n<tbody>\n"
             } else {
                 html += "<tr>"
-                for cell in row.children {
+                for cell in cells {
                     html += "<td>\(cell.children.map(convertToHTML).joined())</td>"
                 }
                 html += "</tr>\n"
             }
         }
-        if !table.children.isEmpty {
-            html += "</tbody>\n"
+        html += "</tbody>\n"
+        return html
+    }
+
+    private func collectTableRows(in node: TymarkNode) -> [TymarkNode] {
+        var rows: [TymarkNode] = []
+        if case .tableRow = node.type {
+            rows.append(node)
         }
+        for child in node.children {
+            rows.append(contentsOf: collectTableRows(in: child))
+        }
+        return rows
+    }
+
+    private func collectTableCells(in node: TymarkNode) -> [TymarkNode] {
+        var cells: [TymarkNode] = []
+        if case .tableCell = node.type {
+            cells.append(node)
+        }
+        for child in node.children {
+            cells.append(contentsOf: collectTableCells(in: child))
+        }
+        return cells
+    }
+
+    private func parseRowsFromRawTable(_ raw: String) -> [[String]] {
+        let lines = raw.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0.contains("|") }
+
+        var rows: [[String]] = []
+        for line in lines {
+            if isSeparatorRow(line) {
+                continue
+            }
+            var cells = line
+                .split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            if cells.first?.isEmpty == true {
+                cells.removeFirst()
+            }
+            if cells.last?.isEmpty == true {
+                cells.removeLast()
+            }
+            if !cells.isEmpty {
+                rows.append(cells)
+            }
+        }
+        return rows
+    }
+
+    private func isSeparatorRow(_ line: String) -> Bool {
+        let stripped = line.replacingOccurrences(of: "|", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: ":", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        return stripped.isEmpty
+    }
+
+    private func renderFallbackRows(_ rows: [[String]]) -> String {
+        guard !rows.isEmpty else { return "" }
+
+        var html = "<thead>\n<tr>"
+        for header in rows[0] {
+            html += "<th>\(escapeHTML(header))</th>"
+        }
+        html += "</tr>\n</thead>\n<tbody>\n"
+
+        if rows.count > 1 {
+            for row in rows.dropFirst() {
+                html += "<tr>"
+                for cell in row {
+                    html += "<td>\(escapeHTML(cell))</td>"
+                }
+                html += "</tr>\n"
+            }
+        }
+
+        html += "</tbody>\n"
         return html
     }
 
@@ -445,6 +542,13 @@ public final class RichTextExporter: Exporter {
                     appendInline(child, to: result, theme: theme)
                 }
             }
+
+        case .wikilink(let target, _):
+            var attrs = bodyAttributes(theme)
+            attrs[.foregroundColor] = theme.colors.link.nsColor
+            attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            attrs[.link] = URL(fileURLWithPath: target + ".md")
+            result.append(NSAttributedString(string: target, attributes: attrs))
 
         case .strikethrough:
             var attrs = bodyAttributes(theme)

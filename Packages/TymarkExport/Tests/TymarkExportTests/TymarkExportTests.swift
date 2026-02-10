@@ -17,6 +17,10 @@ final class TymarkExportTests: XCTestCase {
 
     private func exportHTML(_ markdown: String) -> String? {
         let document = parseDocument(markdown)
+        return exportHTML(document: document)
+    }
+
+    private func exportHTML(document: TymarkDocument) -> String? {
         let exporter = HTMLExporter()
         guard let data = exporter.export(document: document, theme: theme) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -627,6 +631,32 @@ final class TymarkExportTests: XCTestCase {
         XCTAssertTrue(html!.contains("<th>"), "HTML should contain <th> for header cells")
         XCTAssertTrue(html!.contains("<td>"), "HTML should contain <td> for body cells")
         XCTAssertTrue(html!.contains("</table>"), "HTML should contain closing </table>")
+    }
+
+    func testHTMLExporterFallbackTablePreservesEmptyInteriorCells() {
+        let markdown = """
+        | Col A | Col B | Col C |
+        | ----- | ----- | ----- |
+        | left  |       | right |
+        """
+        let tableNode = TymarkNode(
+            type: .table,
+            content: markdown,
+            range: NSRange(location: 0, length: markdown.utf16.count)
+        )
+        let rootNode = TymarkNode(
+            type: .document,
+            range: NSRange(location: 0, length: markdown.utf16.count),
+            children: [tableNode]
+        )
+        let document = TymarkDocument(root: rootNode, source: markdown)
+
+        let html = exportHTML(document: document)
+        XCTAssertNotNil(html)
+        XCTAssertTrue(
+            html!.contains("<td>left</td><td></td><td>right</td>"),
+            "Fallback table parsing should preserve intentionally empty interior cells"
+        )
     }
 
     // MARK: - HTMLExporter: Meta Tags
