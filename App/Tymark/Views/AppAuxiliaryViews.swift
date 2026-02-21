@@ -151,12 +151,36 @@ struct ConflictResolutionView: View {
 
 struct SidebarView: View {
     @EnvironmentObject var workspaceManager: WorkspaceManager
+    @EnvironmentObject var appState: AppState
 
     var body: some View {
         List {
             if let workspace = workspaceManager.currentWorkspace {
                 Section(header: Text(workspace.name)) {
                     FileTreeView(files: workspace.openFiles)
+                }
+            }
+
+            Section(header: Text("Favorites")) {
+                if appState.favoriteDocumentURLs.isEmpty {
+                    Text("No favorites yet")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                } else {
+                    ForEach(appState.favoriteDocumentURLs, id: \.self) { url in
+                        Button {
+                            NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "star.fill")
+                                    .foregroundColor(.yellow)
+                                Text(url.lastPathComponent)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help(url.path(percentEncoded: false))
+                    }
                 }
             }
 
@@ -840,4 +864,3 @@ struct ExportSettingsView: View {
         .padding()
     }
 }
-

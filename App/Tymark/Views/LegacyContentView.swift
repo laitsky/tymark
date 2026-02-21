@@ -22,6 +22,7 @@ struct ContentView: View {
             if appState.isSidebarVisible {
                 SidebarView()
                     .environmentObject(appState.workspaceManager)
+                    .environmentObject(appState)
             }
         } detail: {
             VStack(spacing: 0) {
@@ -230,4 +231,3 @@ struct ContentView: View {
         }
     }
 }
-

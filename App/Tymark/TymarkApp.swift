@@ -53,6 +53,7 @@ final class AppState: ObservableObject {
     @Published var workspaceViewMode: WorkspaceViewMode = .split
     @Published var isInspectorVisible = true
     @Published var isTypewriterModeEnabled = UserDefaults.standard.bool(forKey: "enableTypewriterMode")
+    @Published private(set) var favoriteDocumentPaths: Set<String>
 
     // Phase 6: Zen mode, Find/Replace, Statistics
     @Published var isZenModeEnabled = false
@@ -82,7 +83,12 @@ final class AppState: ObservableObject {
     let keybindingLoader = KeybindingLoader()
     @Published var vimModeHandler = VimModeHandler()
 
+    private static let favoritesUserDefaultsKey = "favoriteDocumentPaths"
+
     init() {
+        let persistedFavorites = UserDefaults.standard.stringArray(forKey: Self.favoritesUserDefaultsKey) ?? []
+        self.favoriteDocumentPaths = Set(persistedFavorites)
+
         let config = keybindingLoader.load()
         self.keybindingHandler = KeybindingHandler(configuration: config)
 
@@ -99,6 +105,43 @@ final class AppState: ObservableObject {
 
         registerCommands()
         keybindingHandler.setCommandRegistry(commandRegistry)
+    }
+
+    var favoriteDocumentURLs: [URL] {
+        favoriteDocumentPaths
+            .map { URL(fileURLWithPath: $0, isDirectory: false) }
+            .sorted { lhs, rhs in
+                let lhsName = lhs.lastPathComponent.lowercased()
+                let rhsName = rhs.lastPathComponent.lowercased()
+                if lhsName != rhsName {
+                    return lhsName < rhsName
+                }
+                return lhs.path.lowercased() < rhs.path.lowercased()
+            }
+    }
+
+    func isFavoriteDocument(_ url: URL?) -> Bool {
+        guard let url else { return false }
+        return favoriteDocumentPaths.contains(Self.favoritePath(for: url))
+    }
+
+    func toggleFavoriteDocument(_ url: URL?) {
+        guard let url else { return }
+        let normalizedPath = Self.favoritePath(for: url)
+        if favoriteDocumentPaths.contains(normalizedPath) {
+            favoriteDocumentPaths.remove(normalizedPath)
+        } else {
+            favoriteDocumentPaths.insert(normalizedPath)
+        }
+        persistFavorites()
+    }
+
+    private func persistFavorites() {
+        UserDefaults.standard.set(Array(favoriteDocumentPaths).sorted(), forKey: Self.favoritesUserDefaultsKey)
+    }
+
+    private static func favoritePath(for url: URL) -> String {
+        url.standardizedFileURL.path
     }
 
 }

@@ -4,6 +4,7 @@ import WebKit
 import TymarkEditor
 import TymarkTheme
 import TymarkSync
+import TymarkWorkspace
 
 // MARK: - Status Bar
 
@@ -239,8 +240,16 @@ struct InspectorPane: View {
     let outlineItems: [DocumentOutlineItem]
     let metadata: DocumentMetadata
     let statistics: DocumentStatistics
+    let backlinks: [BacklinkHit]
+    let documentTags: [String]
+    let workspaceTagCounts: [TagCount]
+    let selectedTag: String?
+    let taggedFiles: [URL]
     let onJump: (DocumentOutlineItem) -> Void
     let onReorder: (IndexSet, Int) -> Void
+    let onOpenBacklink: (URL) -> Void
+    let onSelectTag: (String?) -> Void
+    let onOpenTaggedFile: (URL) -> Void
     @State private var outlineSearch = ""
 
     private var filteredOutlineItems: [DocumentOutlineItem] {
@@ -308,6 +317,114 @@ struct InspectorPane: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                GroupBox("Backlinks") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if backlinks.isEmpty {
+                            Text("No linked references yet")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(backlinks, id: \.sourceURL) { hit in
+                                Button {
+                                    onOpenBacklink(hit.sourceURL)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.uturn.backward.circle")
+                                            .foregroundColor(.secondary)
+                                        Text(hit.sourceURL.lastPathComponent)
+                                            .lineLimit(1)
+                                        Spacer(minLength: 0)
+                                        Text("\(hit.referenceCount)x")
+                                            .font(.caption2.monospaced())
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .help(hit.sourceURL.path(percentEncoded: false))
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Tags") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if documentTags.isEmpty {
+                            Text("No tags in this document")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Document")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+
+                            tagFlow(documentTags, selectedTag: selectedTag, onSelectTag: onSelectTag)
+                        }
+
+                        Divider()
+
+                        HStack {
+                            Text("Workspace")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(workspaceTagCounts.count) tags")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
+                        if workspaceTagCounts.isEmpty {
+                            Text("No tags indexed")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            tagFlow(
+                                workspaceTagCounts.map(\.tag),
+                                selectedTag: selectedTag,
+                                onSelectTag: onSelectTag,
+                                counts: Dictionary(uniqueKeysWithValues: workspaceTagCounts.map { ($0.tag, $0.count) })
+                            )
+                        }
+
+                        if let selectedTag {
+                            Divider()
+                            HStack {
+                                Text("Files tagged #\(selectedTag)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Button("Clear") {
+                                    onSelectTag(nil)
+                                }
+                                .buttonStyle(.plain)
+                                .font(.caption2)
+                            }
+
+                            if taggedFiles.isEmpty {
+                                Text("No files match this tag")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                ForEach(taggedFiles, id: \.self) { url in
+                                    Button {
+                                        onOpenTaggedFile(url)
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "number")
+                                                .foregroundColor(.secondary)
+                                            Text(url.lastPathComponent)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(url.path(percentEncoded: false))
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(12)
         }
@@ -340,6 +457,47 @@ struct InspectorPane: View {
             .padding(.vertical, 3)
         }
         .buttonStyle(.plain)
+    }
+
+    private func tagFlow(
+        _ tags: [String],
+        selectedTag: String?,
+        onSelectTag: @escaping (String?) -> Void,
+        counts: [String: Int] = [:]
+    ) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 6)], alignment: .leading, spacing: 6) {
+            ForEach(tags, id: \.self) { tag in
+                Button {
+                    onSelectTag(selectedTag == tag ? nil : tag)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("#\(tag)")
+                            .lineLimit(1)
+                        if let count = counts[tag] {
+                            Text("\(count)")
+                                .font(.caption2.monospaced())
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill((selectedTag == tag ? Color.accentColor.opacity(0.2) : Color(.controlBackgroundColor)))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(
+                                selectedTag == tag ? Color.accentColor.opacity(0.55) : Color(.separatorColor).opacity(0.45),
+                                lineWidth: 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 

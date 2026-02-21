@@ -59,9 +59,16 @@ struct WorkspaceContentView: View {
     @State private var previewScrollProgress = 0.0
     @State private var isApplyingPreviewDrivenSelection = false
     @State private var previewSyncTask: Task<Void, Never>?
+    @State private var backlinks: [BacklinkHit] = []
+    @State private var documentTags: [String] = []
+    @State private var workspaceTagCounts: [TagCount] = []
+    @State private var selectedTagFilter: String?
+    @State private var taggedFiles: [URL] = []
+    @State private var knowledgeIndex: WorkspaceKnowledgeIndex?
 
     @State private var deriveTask: Task<Void, Never>?
     @State private var spotlightTask: Task<Void, Never>?
+    @State private var knowledgeTask: Task<Void, Never>?
     @State private var pendingPreviewRefresh = true
 
     private var effectiveMode: WorkspaceViewMode {
@@ -72,12 +79,42 @@ struct WorkspaceContentView: View {
         !appState.isFocusModeEnabled && appState.isInspectorVisible
     }
 
+    private var workspaceFileCount: Int {
+        appState.workspaceManager.currentWorkspace?.openFiles.count ?? 0
+    }
+
+    @ViewBuilder
+    private var sidebarPane: some View {
+        if appState.isSidebarVisible {
+            SidebarView()
+                .environmentObject(appState.workspaceManager)
+                .environmentObject(appState)
+        }
+    }
+
+    private var inspectorPaneView: some View {
+        InspectorPane(
+            outlineItems: outlineItems,
+            metadata: document.metadata,
+            statistics: appState.documentStatistics,
+            backlinks: backlinks,
+            documentTags: documentTags,
+            workspaceTagCounts: workspaceTagCounts,
+            selectedTag: selectedTagFilter,
+            taggedFiles: taggedFiles,
+            onJump: jumpToOutline,
+            onReorder: reorderOutline,
+            onOpenBacklink: openDocumentInTab,
+            onSelectTag: { selectedTagFilter = $0 },
+            onOpenTaggedFile: openDocumentInTab
+        )
+        .frame(minWidth: 240, idealWidth: 280, maxWidth: 360, maxHeight: .infinity)
+        .background(Color(.controlBackgroundColor))
+    }
+
     var body: some View {
         NavigationSplitView {
-            if appState.isSidebarVisible {
-                SidebarView()
-                    .environmentObject(appState.workspaceManager)
-            }
+            sidebarPane
         } detail: {
             HSplitView {
                 VStack(spacing: 0) {
@@ -106,15 +143,7 @@ struct WorkspaceContentView: View {
 
                 if showsInspector {
                     Divider()
-                    InspectorPane(
-                        outlineItems: outlineItems,
-                        metadata: document.metadata,
-                        statistics: appState.documentStatistics,
-                        onJump: jumpToOutline,
-                        onReorder: reorderOutline
-                    )
-                    .frame(minWidth: 240, idealWidth: 280, maxWidth: 360, maxHeight: .infinity)
-                    .background(Color(.controlBackgroundColor))
+                    inspectorPaneView
                 }
             }
 
@@ -270,6 +299,7 @@ struct WorkspaceContentView: View {
             refreshDerivedData(for: document.content)
             schedulePreviewRender(for: document.content)
             scheduleSpotlightIndexing(for: document.content)
+            scheduleKnowledgeIndexing(for: document.content)
             updateCursorPosition(for: selection)
         }
         .onDisappear {
@@ -277,11 +307,13 @@ struct WorkspaceContentView: View {
             spotlightTask?.cancel()
             previewSyncTask?.cancel()
             previewViewModel.cancelPendingRender()
+            knowledgeTask?.cancel()
         }
         .onChange(of: document.content) { _, newValue in
             refreshDerivedData(for: newValue)
             schedulePreviewRender(for: newValue)
             scheduleSpotlightIndexing(for: newValue)
+            scheduleKnowledgeIndexing(for: newValue)
         }
         .onChange(of: appState.workspaceViewMode) { _, _ in
             schedulePreviewRender(for: document.content)
@@ -308,6 +340,23 @@ struct WorkspaceContentView: View {
             previewViewModel.setTheme(newTheme)
             pendingPreviewRefresh = true
             schedulePreviewRender(for: document.content)
+        }
+        .onChange(of: workspaceFileCount) { _, _ in
+            scheduleKnowledgeIndexing(for: document.content)
+        }
+        .onChange(of: fileURL) { _, _ in
+            scheduleKnowledgeIndexing(for: document.content)
+        }
+        .onChange(of: selectedTagFilter) { _, newTag in
+            guard let index = knowledgeIndex else {
+                taggedFiles = []
+                return
+            }
+            guard let newTag else {
+                taggedFiles = []
+                return
+            }
+            taggedFiles = filesForTag(newTag, from: index)
         }
     }
 
@@ -410,6 +459,16 @@ struct WorkspaceContentView: View {
 
             Spacer()
 
+            Button {
+                appState.toggleFavoriteDocument(fileURL)
+            } label: {
+                Image(systemName: appState.isFavoriteDocument(fileURL) ? "star.fill" : "star")
+                    .foregroundColor(appState.isFavoriteDocument(fileURL) ? .yellow : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(appState.isFavoriteDocument(fileURL) ? "Remove from favorites" : "Add to favorites")
+            .disabled(fileURL == nil)
+
             HStack(spacing: 10) {
                 Label("\(appState.documentStatistics.wordCount)", systemImage: "text.word.spacing")
                 Label(readingTimeText, systemImage: "clock")
@@ -485,6 +544,101 @@ struct WorkspaceContentView: View {
             guard !Task.isCancelled else { return }
             appState.spotlightIndexer.indexDocument(at: fileURL, content: snapshot, title: title)
         }
+    }
+
+    private func scheduleKnowledgeIndexing(for content: String) {
+        knowledgeTask?.cancel()
+
+        let snapshot = content
+        let currentURL = fileURL
+        let workspaceFiles = appState.workspaceManager.currentWorkspace?.openFiles ?? []
+        let selectedTag = selectedTagFilter
+
+        knowledgeTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+
+            let documents = await Self.loadKnowledgeDocuments(
+                from: workspaceFiles,
+                currentFileURL: currentURL,
+                currentContent: snapshot
+            )
+
+            let index = WorkspaceKnowledgeIndex.build(from: documents)
+            knowledgeIndex = index
+            workspaceTagCounts = index.tagCounts
+            backlinks = currentURL.map { index.backlinks(for: $0) } ?? []
+
+            if let currentURL {
+                documentTags = index.tags(for: currentURL)
+            } else {
+                documentTags = MarkdownKnowledgeParser.extractTags(from: snapshot)
+            }
+
+            if let selectedTag, workspaceTagCounts.contains(where: { $0.tag == selectedTag }) {
+                taggedFiles = filesForTag(selectedTag, from: index)
+            } else {
+                selectedTagFilter = nil
+                taggedFiles = []
+            }
+        }
+    }
+
+    private func filesForTag(_ tag: String, from index: WorkspaceKnowledgeIndex) -> [URL] {
+        index.files(matchingTag: tag).filter { candidate in
+            guard let current = fileURL else { return true }
+            return candidate != current
+        }
+    }
+
+    private static func loadKnowledgeDocuments(
+        from files: [WorkspaceFile],
+        currentFileURL: URL?,
+        currentContent: String
+    ) async -> [URL: String] {
+        let markdownURLs = collectMarkdownFileURLs(from: files)
+
+        return await Task.detached(priority: .utility) {
+            var documents: [URL: String] = [:]
+            documents.reserveCapacity(markdownURLs.count + 1)
+
+            for url in markdownURLs {
+                guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                documents[url.standardizedFileURL] = content
+            }
+
+            if let currentFileURL {
+                documents[currentFileURL.standardizedFileURL] = currentContent
+            }
+
+            return documents
+        }.value
+    }
+
+    private static func collectMarkdownFileURLs(from files: [WorkspaceFile]) -> [URL] {
+        var urls: [URL] = []
+        urls.reserveCapacity(files.count)
+
+        func collect(_ nodes: [WorkspaceFile]) {
+            for node in nodes {
+                if node.isDirectory {
+                    collect(node.children)
+                    continue
+                }
+                let ext = node.url.pathExtension.lowercased()
+                if ["md", "markdown", "mdown", "mkd"].contains(ext) {
+                    urls.append(node.url.standardizedFileURL)
+                }
+            }
+        }
+
+        collect(files)
+
+        // Keep indexing bounded for very large workspaces.
+        if urls.count > 400 {
+            return Array(urls.prefix(400))
+        }
+        return urls
     }
 
     private func updateCursorPosition(for range: NSRange) {
@@ -684,4 +838,3 @@ struct WorkspaceContentView: View {
         }
     }
 }
-

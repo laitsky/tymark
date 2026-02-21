@@ -977,4 +977,126 @@ final class FileOutlineProviderTests: XCTestCase {
     }
 }
 
+// MARK: - MarkdownKnowledgeParser Tests
+
+final class MarkdownKnowledgeParserTests: XCTestCase {
+    func testExtractWikilinksParsesEmbeddedAndRegularTargets() {
+        let source = """
+        See [[Design Doc]] and ![[Assets/logo.png|Logo]] and [[Roadmap#Phase 1]].
+        """
+
+        let links = MarkdownKnowledgeParser.extractWikilinks(from: source)
+        XCTAssertEqual(links.count, 3)
+
+        XCTAssertEqual(links[0].rawTarget, "Design Doc")
+        XCTAssertEqual(links[0].normalizedTarget, "design doc")
+        XCTAssertFalse(links[0].isEmbedded)
+
+        XCTAssertEqual(links[1].rawTarget, "Assets/logo.png|Logo")
+        XCTAssertEqual(links[1].normalizedTarget, "assets/logo.png")
+        XCTAssertTrue(links[1].isEmbedded)
+
+        XCTAssertEqual(links[2].normalizedTarget, "roadmap")
+    }
+
+    func testNormalizeWikilinkTargetStripsAliasFragmentAndMarkdownExtension() {
+        let normalized = MarkdownKnowledgeParser.normalizeWikilinkTarget("./Notes/Design.md#Heading|Alias")
+        XCTAssertEqual(normalized, "notes/design")
+    }
+
+    func testExtractTagsIgnoresHeadingsCodeAndDuplicates() {
+        let source = """
+        # Heading Line
+        Body with #Project and #swift_dev.
+
+        ```
+        #notatag
+        ```
+
+        Inline `#skipme` and #Project again, plus #Release-2026.
+        """
+
+        let tags = MarkdownKnowledgeParser.extractTags(from: source)
+        XCTAssertEqual(tags, ["project", "swift_dev", "release-2026"])
+    }
+
+    func testCandidateTargetsIncludesFilenameAndPathSuffixes() {
+        let url = URL(fileURLWithPath: "/Vault/Notes/Design.md")
+        let targets = Set(MarkdownKnowledgeParser.candidateTargets(for: url))
+
+        XCTAssertTrue(targets.contains("design"))
+        XCTAssertTrue(targets.contains("notes/design"))
+        XCTAssertTrue(targets.contains("vault/notes/design"))
+    }
+}
+
+// MARK: - WorkspaceKnowledgeIndex Tests
+
+final class WorkspaceKnowledgeIndexTests: XCTestCase {
+    func testBacklinksAggregateAcrossDifferentTargetForms() {
+        let design = URL(fileURLWithPath: "/Vault/Notes/Design.md")
+        let project = URL(fileURLWithPath: "/Vault/Project.md")
+        let ideas = URL(fileURLWithPath: "/Vault/Ideas.md")
+
+        let documents: [URL: String] = [
+            design: "# Design",
+            project: """
+            References [[Notes/Design]], [[Design]], and [[Notes/Design]] again.
+            """,
+            ideas: "See [[design]] once."
+        ]
+
+        let index = WorkspaceKnowledgeIndex.build(from: documents)
+        let backlinks = index.backlinks(for: design)
+
+        XCTAssertEqual(backlinks.count, 2)
+        XCTAssertEqual(backlinks[0].sourceURL, project)
+        XCTAssertEqual(backlinks[0].referenceCount, 3)
+        XCTAssertEqual(backlinks[1].sourceURL, ideas)
+        XCTAssertEqual(backlinks[1].referenceCount, 1)
+    }
+
+    func testBacklinksExcludeSelfReferences() {
+        let design = URL(fileURLWithPath: "/Vault/Design.md")
+        let overview = URL(fileURLWithPath: "/Vault/Overview.md")
+        let documents: [URL: String] = [
+            design: "Self link [[Design]]",
+            overview: "Points to [[Design]]"
+        ]
+
+        let index = WorkspaceKnowledgeIndex.build(from: documents)
+        let backlinks = index.backlinks(for: design)
+
+        XCTAssertEqual(backlinks.count, 1)
+        XCTAssertEqual(backlinks[0].sourceURL, overview)
+        XCTAssertEqual(backlinks[0].referenceCount, 1)
+    }
+
+    func testTagCountsAndFilesPerTag() {
+        let project = URL(fileURLWithPath: "/Vault/Project.md")
+        let ideas = URL(fileURLWithPath: "/Vault/Ideas.md")
+        let notes = URL(fileURLWithPath: "/Vault/Notes.md")
+
+        let documents: [URL: String] = [
+            project: "Tags: #Alpha #Beta #alpha",
+            ideas: "Tags: #beta #gamma",
+            notes: "No tags here"
+        ]
+
+        let index = WorkspaceKnowledgeIndex.build(from: documents)
+        let tagCounts = Dictionary(uniqueKeysWithValues: index.tagCounts.map { ($0.tag, $0.count) })
+
+        XCTAssertEqual(tagCounts["alpha"], 1)
+        XCTAssertEqual(tagCounts["beta"], 2)
+        XCTAssertEqual(tagCounts["gamma"], 1)
+        XCTAssertNil(tagCounts["delta"])
+
+        let betaFiles = Set(index.files(matchingTag: "beta"))
+        XCTAssertEqual(betaFiles, Set([project, ideas]))
+
+        XCTAssertEqual(index.tags(for: project), ["alpha", "beta"])
+        XCTAssertEqual(index.tags(for: notes), [])
+    }
+}
+
 #endif
